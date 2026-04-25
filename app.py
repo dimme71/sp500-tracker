@@ -5,184 +5,165 @@ import json
 import os
 import requests
 from datetime import datetime
+import plotly.graph_objects as go
 from streamlit_autorefresh import st_autorefresh
 
 # ─── Page config ───────────────────────────────────────────────
 st.set_page_config(
-    page_title="15m Volume Spike Tracker",
-    page_icon="⚡",
+    page_title="⚡ 15m Spike Visualizer",
+    page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# ─── Custom CSS (Contrast & Helderheid) ────────────────────────
+# ─── Custom CSS ────────────────────────────────────────────────
 st.markdown("""
 <style>
     .stApp { background-color: #0e1117; color: #ffffff; }
     .main-header { color: #00d4ff; font-size: 2.2rem; font-weight: 700; margin-bottom: 0; }
-    .sub-header { color: #cbd5e1; font-size: 1rem; margin-bottom: 1.5rem; }
     .card { 
         background: #1a1d27; 
         border-radius: 12px; 
-        padding: 1.5rem; 
+        padding: 1.2rem; 
         border: 1px solid #3f444e; 
         margin-bottom: 1rem;
     }
-    .card h3 { color: #ffffff !important; margin-top: 0; font-size: 1.2rem; }
-    .price-up { color: #00ff87; font-size: 1.8rem; font-weight: 800; }
-    .price-down { color: #ff3e3e; font-size: 1.8rem; font-weight: 800; }
-    .text-muted { color: #94a3b8 !important; }
-    .stTextInput>div>div>input { background-color: #1a1d27 !important; color: #ffffff !important; }
+    .price-up { color: #00ff87; font-size: 1.5rem; font-weight: 800; }
+    .price-down { color: #ff3e3e; font-size: 1.5rem; font-weight: 800; }
 </style>
 """, unsafe_allow_html=True)
 
-# ─── Config & Secrets ──────────────────────────────────────────
+# ─── Config Laden ──────────────────────────────────────────────
 CONFIG_PATH = "config.json"
 
 def load_config():
-    config = {
-        "watchlist": ["AAPL", "MSFT", "NVDA", "TSLA", "AMD"], 
-        "intraday_ratio": 3.0, 
-        "top_n": 3
-    }
+    config = {"watchlist": ["AAPL", "MSFT", "NVDA", "TSLA"], "intraday_ratio": 3.0}
     if os.path.exists(CONFIG_PATH):
         try:
             with open(CONFIG_PATH, "r") as f:
-                saved = json.load(f)
-                config.update(saved)
+                config.update(json.load(f))
         except: pass
-    
     config["telegram_token"] = st.secrets.get("telegram_token", "")
     config["telegram_chat_id"] = st.secrets.get("telegram_chat_id", "")
     return config
 
 def save_config(cfg):
     with open(CONFIG_PATH, "w") as f:
-        # Sla alleen relevante instellingen op, geen secrets
-        json.dump({
-            "watchlist": cfg["watchlist"], 
-            "intraday_ratio": cfg["intraday_ratio"],
-            "top_n": cfg["top_n"]
-        }, f, indent=2)
+        json.dump({"watchlist": cfg["watchlist"], "intraday_ratio": cfg["intraday_ratio"]}, f)
 
 config = load_config()
 
-# ─── Telegram Functie ──────────────────────────────────────────
-def send_telegram(msg):
-    token = config.get("telegram_token")
-    chat_id = config.get("telegram_chat_id")
-    if token and chat_id:
-        try:
-            url = f"https://api.telegram.org/bot{token}/sendMessage"
-            requests.post(url, json={"chat_id": chat_id, "text": msg, "parse_mode": "HTML"}, timeout=5)
-            return True
-        except: return False
-    return False
+# ─── Plot Functie ──────────────────────────────────────────────
+def plot_volume_spike(t_df, ticker):
+    """Maakt een grafiek van volume over tijd (15m bars)."""
+    # Kleuren bepalen: de laatste bar (de potentiële spike) is goud
+    colors = ['#00d4ff'] * (len(t_df) - 1) + ['#ffc107']
+    
+    fig = go.Figure(data=[
+        go.Bar(
+            x=t_df.index,
+            y=t_df['Volume'],
+            marker_color=colors,
+            name="Volume"
+        )
+    ])
+    
+    # Gemiddelde lijn toevoegen
+    avg_v = t_df['Volume'].iloc[:-1].mean()
+    fig.add_hline(y=avg_v, line_dash="dash", line_color="#ff4b4b", 
+                  annotation_text="Gemiddelde", annotation_position="top left")
 
-# ─── 15m Data Engine ───────────────────────────────────────────
-@st.cache_data(ttl=60) # Kortere cache voor intraday data
-def get_intraday_data(tickers):
-    if not tickers: return pd.DataFrame()
+    fig.update_layout(
+        title=f"Volume Verloop: {ticker} (15m)",
+        template="plotly_dark",
+        height=300,
+        margin=dict(l=20, r=20, t=40, b=20),
+        xaxis_title="Tijdstip",
+        yaxis_title="Volume",
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+    )
+    return fig
+
+# ─── Data Engine ───────────────────────────────────────────────
+@st.cache_data(ttl=60)
+def get_spike_data(tickers):
+    if not tickers: return pd.DataFrame(), {}
     try:
-        # Haal 15-minuten data op van vandaag
         data = yf.download(tickers, period="1d", interval="15m", group_by="ticker", progress=False)
         results = []
+        raw_dfs = {}
         
         for t in tickers:
             try:
-                t_df = data[t] if len(tickers) > 1 else data
-                t_df = t_df.dropna()
-                
+                t_df = data[t].dropna() if len(tickers) > 1 else data.dropna()
                 if len(t_df) < 3: continue
                 
-                latest_bar = t_df.iloc[-1]
-                previous_bars = t_df.iloc[:-1] # Alle bars behalve de laatste
-                
-                current_vol = int(latest_bar['Volume'])
-                avg_vol = int(previous_bars['Volume'].mean())
-                
-                # Ratio berekening
-                ratio = current_vol / avg_vol if avg_vol > 0 else 1
-                
-                price = float(latest_bar['Close'])
-                prev_price = float(previous_bars.iloc[-1]['Close'])
-                change_pct = ((price - prev_price) / prev_price) * 100
+                raw_dfs[t] = t_df
+                latest = t_df.iloc[-1]
+                prev_avg = t_df.iloc[:-1]['Volume'].mean()
+                ratio = latest['Volume'] / prev_avg if prev_avg > 0 else 1
                 
                 results.append({
                     "Ticker": t,
-                    "Prijs": round(price, 2),
-                    "15m Pct": round(change_pct, 2),
-                    "Volume": current_vol,
-                    "Gem. Vol": avg_vol,
+                    "Prijs": round(float(latest['Close']), 2),
                     "Ratio": round(ratio, 2),
+                    "Volume": int(latest['Volume']),
                     "Spike": ratio >= config["intraday_ratio"]
                 })
             except: continue
-            
-        return pd.DataFrame(results).sort_values("Ratio", ascending=False)
-    except: return pd.DataFrame()
+        return pd.DataFrame(results).sort_values("Ratio", ascending=False), raw_dfs
+    except: return pd.DataFrame(), {}
 
 # ─── Sidebar ───────────────────────────────────────────────────
 with st.sidebar:
-    st.header("⚡ Detectie Instellingen")
+    st.header("⚙️ Instellingen")
+    config["intraday_ratio"] = st.slider("Spike Drempel (Ratio)", 1.0, 10.0, float(config["intraday_ratio"]), 0.5)
     
-    # Ratio instelling
-    new_ratio = st.slider("Minimale 15m Ratio", 1.0, 15.0, float(config["intraday_ratio"]), 0.5)
-    if new_ratio != config["intraday_ratio"]:
-        config["intraday_ratio"] = new_ratio
-        save_config(config)
-        st.rerun()
-
-    with st.expander("📋 Watchlist"):
-        new_t = st.text_input("Ticker toevoegen").upper().strip()
-        if st.button("➕"):
-            if new_t and new_t not in config["watchlist"]:
-                config["watchlist"].append(new_t)
-                save_config(config)
-                st.rerun()
-        
-        wl_text = st.text_area("Bewerk lijst", value=", ".join(config["watchlist"]))
-        if st.button("💾 Opslaan"):
-            config["watchlist"] = [x.strip().upper() for x in wl_text.split(",") if x.strip()]
+    new_t = st.text_input("Voeg Ticker toe").upper().strip()
+    if st.button("➕"):
+        if new_t and new_t not in config["watchlist"]:
+            config["watchlist"].append(new_t)
             save_config(config)
             st.rerun()
+    
+    if st.button("💾 Opslaan"): save_config(config)
+    if st.button("🗑️ Reset Lijst"):
+        save_config({"watchlist": [], "intraday_ratio": 3.0})
+        st.rerun()
 
-    st.markdown("---")
-    if st.button("📨 Test Telegram"):
-        send_telegram("⚡ <b>Volume Tracker:</b> Testbericht succesvol.")
-        st.toast("Verzonden!")
+# ─── Main UI ───────────────────────────────────────────────────
+st.markdown("<h1 class='main-header'>⚡ Volume Spike Visualizer</h1>", unsafe_allow_html=True)
 
-# ─── Dashboard UI ──────────────────────────────────────────────
-st.markdown("<h1 class='main-header'>⚡ 15m Volume Spike Tracker</h1>", unsafe_allow_html=True)
-st.markdown(f"<p class='sub-header'>Vergelijkt huidig kwartier met daggemiddelde · Check elke minuut</p>", unsafe_allow_html=True)
-
-df = get_intraday_data(config["watchlist"])
+df, raw_data = get_spike_data(config["watchlist"])
 
 if not df.empty:
-    # Spike Cards
+    # Sectie voor gedetecteerde spikes
     spikes = df[df["Spike"] == True]
+    
     if not spikes.empty:
-        st.markdown(f"### 🚨 {len(spikes)} Volume Spikes Gevonden!")
-        cols = st.columns(min(len(spikes), 4))
-        for i, (_, row) in enumerate(spikes.head(4).iterrows()):
-            with cols[i]:
-                color = "price-up" if row['15m Pct'] >= 0 else "price-down"
-                st.markdown(f"""
-                <div class='card'>
-                    <h3>{row['Ticker']} <span style='color:#00d4ff;'>{row['Ratio']}x</span></h3>
-                    <div class='{color}'>${row['Prijs']:.2f}</div>
-                    <div class='{color}' style='font-size:1rem;'>{row['15m Pct']:+.2f}% (15m)</div>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                # Optioneel: Automatisch Telegram sturen (Let op: kan spammen bij elke refresh)
-                # msg = f"🚨 <b>SPIKE</b>: {row['Ticker']}\nRatio: {row['Ratio']}x\nPrijs: ${row['Prijs']}"
-                # send_telegram(msg)
-
-    st.markdown("### 📊 Alle Live Data (15m Interval)")
+        st.subheader(f"🚨 Gedetecteerde Spikes ({len(spikes)})")
+        for _, row in spikes.iterrows():
+            ticker = row['Ticker']
+            with st.container():
+                col_info, col_chart = st.columns([1, 2])
+                with col_info:
+                    st.markdown(f"""
+                    <div class='card'>
+                        <h3>{ticker}</h3>
+                        <div class='price-up'>${row['Prijs']}</div>
+                        <p>Ratio: <b>{row['Ratio']}x</b><br>
+                        Volume: {row['Volume']:,}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                with col_chart:
+                    st.plotly_chart(plot_volume_spike(raw_data[ticker], ticker), use_container_width=True)
+    
+    # Overzichtstabel
+    st.markdown("---")
+    st.subheader("📊 Alle Tickers")
     st.dataframe(df, use_container_width=True, hide_index=True)
 else:
-    st.info("Wachten op marktdata of de markt is momenteel gesloten.")
+    st.info("Geen data gevonden. Voeg tickers toe of wacht op de marktopening.")
 
-# Kortere autorefresh voor intraday (elke 60 seconden)
-st_autorefresh(interval=60 * 1000, key="intraday_refresh")
+st_autorefresh(interval=60 * 1000, key="refresh")
