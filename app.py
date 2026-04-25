@@ -22,23 +22,39 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# ─── 1. CONFIGURATIE & WATCHLIST BEHEER ───────────────────────
 CONFIG_PATH = "config.json"
 
 def load_config():
-    defaults = {"watchlist": ["AAPL", "MSFT", "NVDA", "TSLA"], "intraday_ratio": 3.0}
+    # Dit zijn je standaard tickers als het bestand leeg is of ontbreekt
+    defaults = {
+        "watchlist": ["AAPL", "MSFT", "NVDA", "TSLA", "AMD", "META"], 
+        "intraday_ratio": 3.0
+    }
     if os.path.exists(CONFIG_PATH):
         try:
             with open(CONFIG_PATH, "r") as f:
-                defaults.update(json.load(f))
-        except: pass
+                saved_data = json.load(f)
+                # Alleen overschrijven als er echt tickers in de file staan
+                if saved_data.get("watchlist"):
+                    defaults["watchlist"] = saved_data["watchlist"]
+                if saved_data.get("intraday_ratio"):
+                    defaults["intraday_ratio"] = saved_data["intraday_ratio"]
+        except: 
+            pass
     return defaults
 
-def save_config(wl, ratio):
-    with open(CONFIG_PATH, "w") as f:
-        json.dump({"watchlist": wl, "intraday_ratio": ratio}, f)
-
+# Zorg dat de configuratie in de sessie geladen wordt
 if 'cfg' not in st.session_state:
     st.session_state.cfg = load_config()
+
+# Helper functie om wijzigingen direct op te slaan
+def sync_config():
+    with open(CONFIG_PATH, "w") as f:
+        json.dump({
+            "watchlist": st.session_state.cfg["watchlist"], 
+            "intraday_ratio": st.session_state.cfg["intraday_ratio"]
+        }, f)
 
 # ─── 2. DATA FUNCTIES ──────────────────────────────────────────
 @st.cache_data(ttl=300)
@@ -64,30 +80,48 @@ def send_telegram(msg):
 
 # ─── 3. SIDEBAR ───────────────────────────────────────────────
 with st.sidebar:
-    st.header("🛠️ Beheer")
-    new_t = st.text_input("Voeg Ticker toe").upper().strip()
-    if st.button("➕ Voeg toe"):
-        if new_t and new_t not in st.session_state.cfg["watchlist"]:
-            st.session_state.cfg["watchlist"].append(new_t)
-            save_config(st.session_state.cfg["watchlist"], st.session_state.cfg["intraday_ratio"])
+    st.header("📋 Watchlist Beheer")
+    
+    # Optie om toe te voegen
+    with st.expander("➕ Ticker Toevoegen", expanded=True):
+        new_t = st.text_input("Symbool (bijv. BTC-USD)").upper().strip()
+        if st.button("Toevoegen"):
+            if new_t and new_t not in st.session_state.watchlist:
+                st.session_state.watchlist.append(new_t)
+                # Opslaan in bestand voor de huidige sessie
+                with open(CONFIG_PATH, "w") as f:
+                    json.dump({"watchlist": st.session_state.watchlist, "intraday_ratio": st.session_state.intraday_ratio}, f)
+                st.success(f"{new_t} toegevoegd")
+                st.rerun()
+
+    # Toon de huidige lijst met verwijder-knoppen
+    st.write("---")
+    st.subheader("Huidige lijst")
+    for t in sorted(st.session_state.watchlist):
+        cols = st.columns([3, 1])
+        cols[0].write(t)
+        if cols[1].button("🗑️", key=f"del_{t}"):
+            st.session_state.watchlist.remove(t)
+            with open(CONFIG_PATH, "w") as f:
+                json.dump({"watchlist": st.session_state.watchlist, "intraday_ratio": st.session_state.intraday_ratio}, f)
             st.rerun()
-    
-    st.session_state.cfg["intraday_ratio"] = st.slider("Spike Ratio", 1.0, 10.0, float(st.session_state.cfg["intraday_ratio"]))
-    
-    if st.button("🗑️ Reset Lijst"):
-        st.session_state.cfg["watchlist"] = ["AAPL"]
-        save_config(st.session_state.cfg["watchlist"], 3.0)
-        st.rerun()
+
+    st.write("---")
+    st.session_state.intraday_ratio = st.slider("Spike Ratio", 1.0, 10.0, float(st.session_state.intraday_ratio))
 
 # ─── 4. MAIN DASHBOARD ────────────────────────────────────────
 st.markdown("<h1 class='main-header'>⚡ Volume Spike Explorer</h1>", unsafe_allow_html=True)
 
-# Selectie menu's
+# Selectie menu's (HIER VERVANGEN)
 c1, c2, c3 = st.columns([1, 1, 1])
+
 with c1:
-    sel_ticker = st.selectbox("Ticker", st.session_state.cfg["watchlist"])
+    # Gebruik cfg["watchlist"] in plaats van alleen watchlist
+    selected_ticker = st.selectbox("Ticker", st.session_state.cfg["watchlist"])
+
 with c2:
     sel_period = st.selectbox("Tijdsbestek", ["1d", "5d", "1mo", "6mo", "1y", "max"], index=1)
+
 with c3:
     sel_interval = st.selectbox("Detail (Zoom)", ["1m", "5m", "15m", "60m", "1d", "1wk"], index=2)
 
