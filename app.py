@@ -82,32 +82,32 @@ def send_telegram(msg):
 with st.sidebar:
     st.header("📋 Watchlist Beheer")
     
-    # Optie om toe te voegen
+    # 1. Ticker Toevoegen
     with st.expander("➕ Ticker Toevoegen", expanded=True):
-        new_t = st.text_input("Symbool (bijv. BTC-USD)").upper().strip()
+        new_t = st.text_input("Symbool (bijv. TSLA)").upper().strip()
         if st.button("Toevoegen"):
-            if new_t and new_t not in st.session_state.watchlist:
-                st.session_state.watchlist.append(new_t)
-                # Opslaan in bestand voor de huidige sessie
-                with open(CONFIG_PATH, "w") as f:
-                    json.dump({"watchlist": st.session_state.watchlist, "intraday_ratio": st.session_state.intraday_ratio}, f)
-                st.success(f"{new_t} toegevoegd")
+            if new_t and new_t not in st.session_state.cfg["watchlist"]:
+                st.session_state.cfg["watchlist"].append(new_t)
+                sync_config() # Sla op naar config.json
                 st.rerun()
 
-    # Toon de huidige lijst met verwijder-knoppen
+    # 2. Lijst tonen en verwijderen
     st.write("---")
     st.subheader("Huidige lijst")
-    for t in sorted(st.session_state.watchlist):
+    # HIER zat de fout, nu gecorrigeerd naar st.session_state.cfg["watchlist"]
+    for t in sorted(st.session_state.cfg["watchlist"]):
         cols = st.columns([3, 1])
         cols[0].write(t)
         if cols[1].button("🗑️", key=f"del_{t}"):
-            st.session_state.watchlist.remove(t)
-            with open(CONFIG_PATH, "w") as f:
-                json.dump({"watchlist": st.session_state.watchlist, "intraday_ratio": st.session_state.intraday_ratio}, f)
+            st.session_state.cfg["watchlist"].remove(t)
+            sync_config() # Sla op naar config.json
             st.rerun()
 
     st.write("---")
-    st.session_state.intraday_ratio = st.slider("Spike Ratio", 1.0, 10.0, float(st.session_state.intraday_ratio))
+    # Ratio aanpassen binnen de cfg
+    st.session_state.cfg["intraday_ratio"] = st.slider(
+        "Spike Ratio", 1.0, 10.0, float(st.session_state.cfg["intraday_ratio"])
+    )
 
 # ─── 4. MAIN DASHBOARD ────────────────────────────────────────
 st.markdown("<h1 class='main-header'>⚡ Volume Spike Explorer</h1>", unsafe_allow_html=True)
