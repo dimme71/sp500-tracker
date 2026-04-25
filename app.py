@@ -49,17 +49,37 @@ CONFIG_PATH = "config.json"
 
 @st.cache_data(ttl=60)
 def load_config():
+    config = {}
+    
+    # Streamlit Secrets hebben voorrang (cloud deployment)
+    if hasattr(st, "secrets") and st.secrets:
+        config["telegram_token"] = st.secrets.get("telegram_token", "")
+        config["telegram_chat_id"] = st.secrets.get("telegram_chat_id", "")
+    else:
+        config["telegram_token"] = ""
+        config["telegram_chat_id"] = ""
+    
+    # Config.json als fallback voor lokale development
     if os.path.exists(CONFIG_PATH):
         with open(CONFIG_PATH, "r") as f:
-            return json.load(f)
-    return {
-        "watchlist": ["AAPL", "MSFT", "NVDA", "GOOGL", "AMZN"],
-        "volume_threshold": 2.0,
-        "check_interval_minutes": 15,
-        "top_n": 3,
-        "telegram_token": "",
-        "telegram_chat_id": ""
-    }
+            file_config = json.load(f)
+        # Alleen niet-telegram values uit file, tenzij secrets leeg zijn
+        config["watchlist"] = file_config.get("watchlist", ["AAPL", "MSFT", "NVDA", "GOOGL", "AMZN"])
+        config["volume_threshold"] = file_config.get("volume_threshold", 2.0)
+        config["check_interval_minutes"] = file_config.get("check_interval_minutes", 15)
+        config["top_n"] = file_config.get("top_n", 3)
+        # Telegram uit file alleen als secrets niet beschikbaar zijn
+        if not config["telegram_token"]:
+            config["telegram_token"] = file_config.get("telegram_token", "")
+            config["telegram_chat_id"] = file_config.get("telegram_chat_id", "")
+    else:
+        config.setdefault("watchlist", ["AAPL", "MSFT", "NVDA", "GOOGL", "AMZN"])
+        config.setdefault("volume_threshold", 2.0)
+        config.setdefault("check_interval_minutes", 15)
+        config.setdefault("top_n", 3)
+    
+    return config
+
 
 def save_config(cfg):
     with open(CONFIG_PATH, "w") as f:
