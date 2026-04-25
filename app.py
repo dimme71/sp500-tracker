@@ -321,4 +321,39 @@ display_df = display_df.rename(columns={
 # ─── GEFIXT: .map() i.p.v. .applymap() ────────────────────────
 styled = display_df[["Ticker", "Prijs", "Verandering", "%", "Volume", "Ratio", "Status"]].style.map(
     lambda v: "color: #ff1744; font-weight: 600" if isinstance(v, str) and "🔴" in v
-    else "color: #00c853; font-weight: 600" if isinstance(v, str) and "▲" in v_
+    else "color: #00c853; font-weight: 600" if isinstance(v, str) and "▲" in v
+    else ""
+)
+st.dataframe(
+    styled,
+    use_container_width=True,
+    height=400,
+    column_config={
+        "Ticker": st.column_config.TextColumn("Ticker", width="small"),
+        "Prijs": st.column_config.TextColumn("Prijs", width="small"),
+        "Verandering": st.column_config.TextColumn("Verandering", width="small"),
+        "%": st.column_config.TextColumn("%", width="small"),
+        "Volume": st.column_config.TextColumn("Volume", width="small"),
+        "Ratio": st.column_config.TextColumn("Ratio", width="small"),
+        "Status": st.column_config.TextColumn("Status", width="small"),
+    }
+)
+
+# ─── Volume anomalie meldingen ─────────────────────────────────
+alerts = df[df["high_volume"] == True]
+if not alerts.empty:
+    st.markdown("### 🔔 Volume Anomalieën")
+    for _, row in alerts.iterrows():
+        info = get_ticker_info(row["ticker"])
+        st.info(f"**{info['name']}** ({row['ticker']}) — Volume {row['vol_ratio']:.1f}x hoger dan gemiddeld!")
+        # Stuur Telegram notificatie
+        msg = f"🔔 <b>Volume Anomalie</b>\n{info['name']} ({row['ticker']})\nVolume: {row['vol_ratio']:.1f}x gemiddelde\nPrijs: ${row['price']:,.2f}"
+        send_telegram(msg)
+
+# ─── Footer ────────────────────────────────────────────────────
+st.markdown("---")
+st.markdown(
+    "<div class='footer'>S&P 500 Top 3 Tracker · Data: Yahoo Finance · "
+    f"Auto-refresh elke {config.get('check_interval_minutes', 15)} minuten</div>",
+    unsafe_allow_html=True
+)
