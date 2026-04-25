@@ -97,26 +97,49 @@ hist_df, error = get_data_safe(sel_ticker, sel_period, sel_interval)
 if error:
     st.error(f"⚠️ {error}")
 elif hist_df is not None:
+    # --- FIX: Kolommen platslaan als ze Multi-Index zijn ---
+    if isinstance(hist_df.columns, pd.MultiIndex):
+        hist_df.columns = hist_df.columns.get_level_values(0)
+    
+    # Zorg dat de index (tijd) bruikbaar is voor Plotly
+    hist_df = hist_df.reset_index()
+    time_col = hist_df.columns[0] # Meestal 'Date' of 'Datetime'
+
+    # --- FIX: Zorg dat mean() een enkel getal is ---
+    avg_v = float(hist_df['Volume'].mean())
+    last_v = int(hist_df['Volume'].iloc[-1])
+    
     # Plotting
     colors = ['#00d4ff'] * (len(hist_df) - 1) + ['#ffc107']
-    fig = go.Figure(go.Bar(x=hist_df.index, y=hist_df['Volume'], marker_color=colors))
-    fig.add_hline(y=hist_df['Volume'].mean(), line_dash="dash", line_color="#ff4b4b")
-    fig.update_layout(template="plotly_dark", height=450, xaxis_rangeslider_visible=True, margin=dict(l=0,r=0,t=30,b=0))
+    
+    fig = go.Figure(go.Bar(
+        x=hist_df[time_col], 
+        y=hist_df['Volume'], 
+        marker_color=colors,
+        name="Volume"
+    ))
+    
+    # De lijn heeft nu een vast getal (avg_v)
+    fig.add_hline(y=avg_v, line_dash="dash", line_color="#ff4b4b")
+    
+    fig.update_layout(
+        template="plotly_dark", 
+        height=450, 
+        xaxis_rangeslider_visible=True, 
+        margin=dict(l=0,r=0,t=30,b=0)
+    )
     st.plotly_chart(fig, use_container_width=True)
     
     # Metrics
-    last_v = int(hist_df['Volume'].iloc[-1])
-    avg_v = int(hist_df['Volume'].mean())
-    current_ratio = last_v / avg_v
+    current_ratio = last_v / avg_v if avg_v > 0 else 0
     
     m1, m2, m3 = st.columns(3)
     m1.metric("Huidig Volume", f"{last_v:,}")
-    m2.metric("Gemiddelde", f"{avg_v:,}")
+    m2.metric("Gemiddelde", f"{int(avg_v):,}")
     m3.metric("Ratio", f"{current_ratio:.2f}x")
 
     # Automatische Alert Check
     if current_ratio >= st.session_state.cfg["intraday_ratio"]:
         st.warning(f"🚨 SPIKE DETECTIE: {sel_ticker} vertoont {current_ratio:.2f}x normaal volume!")
-        # send_telegram(f"🚨 <b>Volume Spike</b>: {sel_ticker} op {current_ratio:.2f}x")
 
 st_autorefresh(interval=60 * 1000, key="auto_refresh")
