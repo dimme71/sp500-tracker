@@ -1,409 +1,304 @@
-#!/usr/bin/env python3
-"""
-S&P 500 Live Tracker — Streamlit Dashboard
-Gebruik: streamlit run app.py
-"""
-
-import json
-import os
-import time
-from datetime import datetime
-from pathlib import Path
-
 import streamlit as st
 import yfinance as yf
 import pandas as pd
+import time
+import json
+import os
 import requests
+from datetime import datetime, timedelta
+import plotly.graph_objects as go
+from streamlit_autorefresh import st_autorefresh
 
-# ─── Config ───────────────────────────────────────────────────────────────────
-CONFIG_PATH = Path(__file__).parent / "config.json"
-
-DEFAULT_CONFIG = {
-    "watchlist": ["AAPL", "MSFT", "NVDA", "GOOGL", "AMZN"],
-    "volume_threshold": 2.0,
-    "check_interval_minutes": 15,
-    "top_n": 3,
-    "telegram_token": "",
-    "telegram_chat_id": "",
-    "last_notifications": {}
-}
-
-NOTIFICATION_COOLDOWN = 3600
-
-
-# ─── Config beheer ────────────────────────────────────────────────────────────
-def load_config() -> dict:
-    cfg = {**DEFAULT_CONFIG}
-
-    # 1. Laad lokaal config.json (voor lokale dev)
-    if CONFIG_PATH.exists():
-        data = json.loads(CONFIG_PATH.read_text())
-        cfg.update(data)
-
-    # 2. Overschrijf met Streamlit Secrets (voor cloud deploy)
-    try:
-        secrets = st.secrets.to_dict()
-        if "telegram" in secrets:
-            if "token" in secrets["telegram"]:
-                cfg["telegram_token"] = secrets["telegram"]["token"]
-            if "chat_id" in secrets["telegram"]:
-                cfg["telegram_chat_id"] = secrets["telegram"]["chat_id"]
-    except Exception:
-        pass  # Geen secrets beschikbaar (lokaal)
-
-    return cfg
-
-
-def save_config(cfg: dict):
-    CONFIG_PATH.write_text(json.dumps(cfg, indent=2))
-
-
-# ─── Data ophalen (vereenvoudigd voor Streamlit) ─────────────────────────────
-@st.cache_data(ttl=300)  # 5 min cache
-def get_sp500_top(n: int = 3) -> pd.DataFrame:
-    tickers = [
-        "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "BRK-B", "TSLA",
-        "AVGO", "JPM", "V", "LLY", "WMT", "XOM", "UNH", "MA", "PG", "JNJ",
-        "COST", "HD", "ORCL", "BAC", "ABBV", "CVX", "KO", "MRK", "PEP",
-        "CRM", "ADBE", "TMO", "NFLX", "AMD", "ACN", "LIN", "MCD", "CSCO",
-        "ABT", "WFC", "DHR", "TXN", "QCOM", "VZ", "NEE", "IBM", "DIS",
-        "INTU", "AMGN", "GE", "CAT", "SPGI", "GS", "MS", "RTX", "PFE",
-        "T", "C", "LOW", "HON", "BA", "AXP", "UBER", "AMAT", "BKNG",
-        "PLTR", "SYK", "MDT", "LMT", "DE", "BLK", "CB", "ADP", "GILD",
-        "ADSK", "ADI", "PANW", "VRTX", "MU", "F", "GM", "SBUX", "MMM",
-        "NKE", "LRCX", "KLAC", "CMG", "MRNA", "ABNB", "DASH", "SNOW",
-    ]
-
-    data = yf.download(tickers, period="2d", group_by="ticker", progress=False)
-
-    rows = []
-    for t in tickers:
-        try:
-            if t not in data.columns.levels[0]:
-                continue
-            df = data[t]
-            if df.empty or "Close" not in df.columns:
-                continue
-            close_prices = df["Close"].dropna()
-            volumes = df["Volume"].dropna()
-            if close_prices.empty or volumes.empty:
-                continue
-
-            price = float(close_prices.iloc[-1])
-            volume = int(volumes.iloc[-1])
-            avg_volume = int(volumes.mean())
-            t_info = yf.Ticker(t).info
-            shares = t_info.get("sharesOutstanding", t_info.get("impliedSharesOutstanding", 0))
-            market_cap = price * int(shares) if shares else 0
-
-            # Daily change
-            change = 0.0
-            if len(close_prices) >= 2:
-                change = round(((close_prices.iloc[-1] - close_prices.iloc[-2]) / close_prices.iloc[-2]) * 100, 2)
-
-            rows.append({
-                "Ticker": t,
-                "Prijs": round(price, 2),
-                "±%": change,
-                "Volume": volume,
-                "Gem. Volume": avg_volume,
-                "xGem": round(volume / avg_volume, 2) if avg_volume > 0 else 0,
-                "Mkt Cap": market_cap,
-            })
-        except Exception:
-            continue
-
-    df_result = pd.DataFrame(rows)
-    df_result = df_result.sort_values("Mkt Cap", ascending=False).head(n)
-    return df_result
-
-
-@st.cache_data(ttl=300)
-def get_watchlist_data(tickers: list[str]) -> pd.DataFrame:
-    if not tickers:
-        return pd.DataFrame()
-
-    data = yf.download(tickers, period="5d", group_by="ticker", progress=False)
-
-    rows = []
-    for t in tickers:
-        try:
-            if t not in data.columns.levels[0]:
-                continue
-            df = data[t]
-            if df.empty:
-                continue
-            close_prices = df["Close"].dropna()
-            volumes = df["Volume"].dropna()
-            if close_prices.empty or volumes.empty:
-                continue
-
-            price = float(close_prices.iloc[-1])
-            volume = int(volumes.iloc[-1])
-            avg_volume = int(volumes.mean())
-
-            change = 0.0
-            if len(close_prices) >= 2:
-                change = round(((close_prices.iloc[-1] - close_prices.iloc[-2]) / close_prices.iloc[-2]) * 100, 2)
-
-            rows.append({
-                "Ticker": t.upper(),
-                "Prijs": round(price, 2),
-                "±%": change,
-                "Volume": volume,
-                "Gem. Volume": avg_volume,
-                "xGem": round(volume / avg_volume, 2) if avg_volume > 0 else 0,
-            })
-        except Exception:
-            continue
-
-    return pd.DataFrame(rows)
-
-
-def format_market_cap(cap: float) -> str:
-    if cap >= 1_000_000_000_000:
-        return f"${cap/1_000_000_000_000:.2f}T"
-    elif cap >= 1_000_000_000:
-        return f"${cap/1_000_000_000:.2f}B"
-    elif cap >= 1_000_000:
-        return f"${cap/1_000_000:.2f}M"
-    return f"${cap:.0f}"
-
-
-def color_change(val):
-    """Kleur voor ±% kolom."""
-    if val > 0:
-        return "color: #00c853"
-    elif val < 0:
-        return "color: #ff1744"
-    return ""
-
-
-def color_volume(val):
-    """Kleur voor volume ratio — rood als boven threshold."""
-    try:
-        cfg = load_config()
-        threshold = cfg["volume_threshold"]
-        if float(val) >= threshold:
-            return "background-color: #ff1744; color: white; font-weight: bold"
-    except:
-        pass
-    return ""
-
-
-def send_telegram_alert(ticker: str, price: float, volume_ratio: float, avg_volume: int, volume: int):
-    """Stuur een volume-alert via Telegram."""
-    cfg = load_config()
-    token = cfg.get("telegram_token", "")
-    chat_id = cfg.get("telegram_chat_id", "")
-    if not token or not chat_id:
-        return False
-
-    # Cooldown check
-    now = time.time()
-    key = f"vol_{ticker}"
-    last = cfg.get("last_notifications", {}).get(key, 0)
-    if now - last < NOTIFICATION_COOLDOWN:
-        return False  # skip, nog in cooldown
-
-    message = (
-        f"🚨 *Volume Alert!*\n\n"
-        f"**{ticker}** — ${price:.2f}\n\n"
-        f"📊 Volume: {volume:,}\n"
-        f"📈 Gem. volume: {avg_volume:,}\n"
-        f"🔥 Ratio: **x{volume_ratio:.1f}**\n\n"
-        f"_{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}_"
-    )
-
-    try:
-        url = f"https://api.telegram.org/bot{token}/sendMessage"
-        resp = requests.post(url, json={
-            "chat_id": chat_id,
-            "text": message,
-            "parse_mode": "Markdown",
-        }, timeout=10)
-
-        if resp.status_code == 200:
-            # Update cooldown
-            if "last_notifications" not in cfg:
-                cfg["last_notifications"] = {}
-            cfg["last_notifications"][key] = now
-            save_config(cfg)
-            return True
-    except:
-        pass
-    return False
-
-
-def check_and_alert_volume(wl_data: pd.DataFrame):
-    """Controleer watchlist op volume-anomalieën en stuur alerts."""
-    cfg = load_config()
-    threshold = cfg["volume_threshold"]
-    alerts = wl_data[wl_data["xGem"] >= threshold]
-
-    for _, row in alerts.iterrows():
-        sent = send_telegram_alert(
-            ticker=row["Ticker"],
-            price=row["Prijs"],
-            volume_ratio=row["xGem"],
-            avg_volume=row["Gem. Volume"],
-            volume=row["Volume"],
-        )
-        if sent:
-            st.toast(f"📨 Alert verstuurd voor {row['Ticker']}!", icon="✅")
-
-
-# ─── Streamlit UI ─────────────────────────────────────────────────────────────
+# ─── Page config ───────────────────────────────────────────────
 st.set_page_config(
-    page_title="S&P 500 Tracker",
+    page_title="S&P 500 Top 3 Tracker",
     page_icon="📈",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="collapsed"
 )
 
-# Title
-col1, col2 = st.columns([3, 1])
-with col1:
-    st.title("📈 S&P 500 Live Tracker")
-with col2:
-    st.caption(f"Laatste update: {datetime.now().strftime('%H:%M:%S')}")
-    if st.button("🔄 Ververs", use_container_width=True):
+# ─── Custom CSS ────────────────────────────────────────────────
+st.markdown("""
+<style>
+    .stApp { background-color: #0e1117; }
+    .main-header { color: #00d4ff; font-size: 2.2rem; font-weight: 700; margin-bottom: 0; }
+    .sub-header { color: #8892b0; font-size: 0.9rem; margin-bottom: 1.5rem; }
+    .card { background: #1a1d27; border-radius: 12px; padding: 1.2rem; border: 1px solid #2a2d3a; margin-bottom: 0.8rem; }
+    .card h3 { color: #ccd6f6; font-size: 1rem; margin: 0 0 0.3rem 0; }
+    .price-up { color: #00c853; font-size: 1.4rem; font-weight: 700; }
+    .price-down { color: #ff1744; font-size: 1.4rem; font-weight: 700; }
+    .change-up { color: #00c853; font-size: 0.85rem; }
+    .change-down { color: #ff1744; font-size: 0.85rem; }
+    .volume-text { color: #8892b0; font-size: 0.8rem; }
+    .badge { display: inline-block; background: #00d4ff22; color: #00d4ff; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; margin-left: 6px; }
+    .stButton>button { background: #00d4ff; color: #0e1117; font-weight: 600; border-radius: 8px; }
+    .stTextInput>div>div>input { background: #1a1d27; color: #ccd6f6; border: 1px solid #2a2d3a; border-radius: 8px; }
+    .stSelectbox>div>div>select { background: #1a1d27; color: #ccd6f6; border: 1px solid #2a2d3a; }
+    .watchlist-tag { display: inline-block; background: #1a1d27; color: #ccd6f6; padding: 4px 10px; border-radius: 6px; margin: 2px; border: 1px solid #2a2d3a; font-size: 0.8rem; }
+    .footer { color: #4a5568; font-size: 0.7rem; text-align: center; margin-top: 2rem; }
+    div[data-testid="stMetricValue"] { font-size: 1.8rem !important; }
+    @media (max-width: 768px) {
+        .main-header { font-size: 1.5rem; }
+        .price-up, .price-down { font-size: 1.1rem; }
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# ─── Config laden ──────────────────────────────────────────────
+CONFIG_PATH = "config.json"
+
+@st.cache_data(ttl=60)
+def load_config():
+    if os.path.exists(CONFIG_PATH):
+        with open(CONFIG_PATH, "r") as f:
+            return json.load(f)
+    return {
+        "watchlist": ["AAPL", "MSFT", "NVDA", "GOOGL", "AMZN"],
+        "volume_threshold": 2.0,
+        "check_interval_minutes": 15,
+        "top_n": 3,
+        "telegram_token": "",
+        "telegram_chat_id": ""
+    }
+
+def save_config(cfg):
+    with open(CONFIG_PATH, "w") as f:
+        json.dump(cfg, f, indent=2)
+    st.cache_data.clear()
+
+config = load_config()
+
+# ─── S&P 500 lijst ─────────────────────────────────────────────
+SP500_TICKERS = [
+    "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "BRK.B", "LLY", "AVGO", "JPM",
+    "V", "TSLA", "XOM", "UNH", "MA", "PG", "JNJ", "COST", "HD", "ORCL",
+    "ABBV", "CVX", "MRK", "KO", "BAC", "CRM", "PEP", "ADBE", "WMT", "NFLX",
+    "TMO", "ACN", "MCD", "CSCO", "DIS", "ABT", "AMD", "CMCSA", "QCOM", "VZ",
+    "INTU", "TXN", "AMGN", "CAT", "IBM", "PM", "GE", "NEE", "GS", "BA",
+    "MS", "SPGI", "RTX", "HON", "LOW", "ISRG", "BLK", "PLD", "AMAT", "T",
+    "SYK", "LMT", "TJX", "UNP", "ELV", "MDT", "DE", "AXP", "SBUX", "ADP",
+    "GILD", "MMC", "C", "BSX", "SCHW", "TMUS", "BMY", "UPS", "CB", "ADI",
+    "CI", "MDLZ", "AMT", "REGN", "MO", "NKE", "DUK", "SO", "ICE", "INTC",
+    "CL", "WM", "ZTS", "SHW", "PH", "EOG", "PGR", "ITW", "MCO", "PNC"
+]
+
+# ─── Data fetching ─────────────────────────────────────────────
+@st.cache_data(ttl=300)
+def get_sp500_data():
+    """Haal data op voor de top N S&P 500 op basis van volume-afwijking."""
+    tickers = config.get("watchlist", SP500_TICKERS[:20])
+    top_n = config.get("top_n", 3)
+    vol_threshold = config.get("volume_threshold", 2.0)
+
+    try:
+        data = yf.download(
+            tickers,
+            period="5d",
+            interval="1d",
+            group_by="ticker",
+            progress=False,
+            auto_adjust=True
+        )
+
+        results = []
+        for t in tickers:
+            try:
+                if isinstance(data.columns, pd.MultiIndex):
+                    t_data = data[t]
+                else:
+                    t_data = data
+
+                if t_data.empty or len(t_data) < 2:
+                    continue
+
+                latest = t_data.iloc[-1]
+                prev = t_data.iloc[-2]
+
+                price = float(latest.get("Close", latest.get("Adj Close", 0)))
+                prev_close = float(prev.get("Close", prev.get("Adj Close", 0)))
+                change = price - prev_close
+                change_pct = (change / prev_close) * 100 if prev_close else 0
+                volume = int(latest.get("Volume", 0))
+
+                # Volume gemiddelde (5 dagen)
+                avg_volume = int(t_data["Volume"].mean()) if "Volume" in t_data.columns else 1
+                vol_ratio = volume / avg_volume if avg_volume else 1
+
+                results.append({
+                    "ticker": t,
+                    "price": round(price, 2),
+                    "change": round(change, 2),
+                    "change_pct": round(change_pct, 2),
+                    "volume": volume,
+                    "avg_volume": avg_volume,
+                    "vol_ratio": round(vol_ratio, 2),
+                    "high_volume": vol_ratio >= vol_threshold
+                })
+            except Exception:
+                continue
+
+        df = pd.DataFrame(results)
+        if df.empty:
+            return pd.DataFrame()
+
+        # Sorteer op volume-afwijking (hoogste eerst)
+        df = df.sort_values("vol_ratio", ascending=False).head(top_n * 3)
+        return df
+
+    except Exception as e:
+        st.error(f"Fout bij ophalen data: {e}")
+        return pd.DataFrame()
+
+@st.cache_data(ttl=86400)
+def get_ticker_info(ticker):
+    """Haal bedrijfsinformatie op."""
+    try:
+        t = yf.Ticker(ticker)
+        info = t.info
+        return {
+            "name": info.get("shortName", info.get("longName", ticker)),
+            "sector": info.get("sector", "N/A"),
+            "industry": info.get("industry", "N/A")
+        }
+    except:
+        return {"name": ticker, "sector": "N/A", "industry": "N/A"}
+
+# ─── Telegram notificatie ──────────────────────────────────────
+def send_telegram(msg):
+    token = config.get("telegram_token", "")
+    chat_id = config.get("telegram_chat_id", "")
+    if token and chat_id:
+        try:
+            url = f"https://api.telegram.org/bot{token}/sendMessage"
+            requests.post(url, json={"chat_id": chat_id, "text": msg, "parse_mode": "HTML"}, timeout=5)
+        except:
+            pass
+
+# ─── Sidebar ───────────────────────────────────────────────────
+with st.sidebar:
+    st.markdown("### ⚙️ Instellingen")
+
+    with st.expander("📋 Watchlist", expanded=True):
+        current_watchlist = config.get("watchlist", [])
+        watchlist_str = st.text_area(
+            "Tickers (komma-gescheiden)",
+            value=", ".join(current_watchlist),
+            height=100,
+            help="Bijv: AAPL, MSFT, NVDA, GOOGL, AMZN"
+        )
+        new_watchlist = [t.strip().upper() for t in watchlist_str.split(",") if t.strip()]
+        if new_watchlist and new_watchlist != current_watchlist:
+            config["watchlist"] = new_watchlist
+            save_config(config)
+            st.success(f"✅ Watchlist bijgewerkt ({len(new_watchlist)} tickers)")
+
+        st.markdown("**Huidige watchlist:**")
+        cols = st.columns(3)
+        for i, t in enumerate(current_watchlist[:9]):
+            cols[i % 3].markdown(f"<span class='watchlist-tag'>{t}</span>", unsafe_allow_html=True)
+        if len(current_watchlist) > 9:
+            st.caption(f"...en {len(current_watchlist) - 9} meer")
+
+    with st.expander("📊 Criteria", expanded=True):
+        new_top_n = st.number_input("Top N resultaten", min_value=1, max_value=20, value=config.get("top_n", 3))
+        new_vol_threshold = st.slider("Volume drempel (x gemiddelde)", 1.0, 10.0, config.get("volume_threshold", 2.0), 0.1)
+        if new_top_n != config.get("top_n") or new_vol_threshold != config.get("volume_threshold"):
+            config["top_n"] = new_top_n
+            config["volume_threshold"] = new_vol_threshold
+            save_config(config)
+
+    with st.expander("🤖 Telegram", expanded=False):
+        new_token = st.text_input("Bot Token", value=config.get("telegram_token", ""), type="password")
+        new_chat_id = st.text_input("Chat ID", value=config.get("telegram_chat_id", ""))
+        if new_token != config.get("telegram_token") or new_chat_id != config.get("telegram_chat_id"):
+            config["telegram_token"] = new_token
+            config["telegram_chat_id"] = new_chat_id
+            save_config(config)
+            st.success("✅ Telegram config opgeslagen")
+
+        if st.button("📨 Test notificatie", use_container_width=True):
+            test_msg = f"<b>✅ S&P 500 Tracker Test</b>\n\nBot werkt correct! 🎉\nTijd: {datetime.now().strftime('%H:%M:%S')}"
+            send_telegram(test_msg)
+            st.success("Test notificatie verzonden!")
+
+    st.markdown("---")
+    st.markdown(f"<div class='footer'>Laatste update: {datetime.now().strftime('%H:%M:%S')}</div>", unsafe_allow_html=True)
+    if st.button("🔄 Verversen", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
 
-cfg = load_config()
+# ─── Auto-refresh ──────────────────────────────────────────────
+refresh_interval = config.get("check_interval_minutes", 15) * 60 * 1000
+st_autorefresh(interval=refresh_interval, key="auto_refresh")
 
-# ─── S&P 500 Top ──────────────────────────────────────────────────────────────
-st.subheader(f"🏆 S&P 500 Top {cfg['top_n']} — Market Cap")
+# ─── Main content ──────────────────────────────────────────────
+st.markdown("<h1 class='main-header'>📈 S&P 500 Top 3 Tracker</h1>", unsafe_allow_html=True)
+st.markdown("<p class='sub-header'>Live volume-afwijking monitoring · Automatische notificaties</p>", unsafe_allow_html=True)
 
-with st.spinner("Live data ophalen..."):
-    top3 = get_sp500_top(cfg["top_n"])
-
-if not top3.empty:
-    # Format market cap voor display
-    display = top3.copy()
-    display["Mkt Cap"] = display["Mkt Cap"].apply(format_market_cap)
-    display["Volume"] = display["Volume"].apply(lambda x: f"{x:,}")
-    display["Gem. Volume"] = display["Gem. Volume"].apply(lambda x: f"{x:,}")
-
-    styled = display.style \
-        .map(color_change, subset=["±%"]) \
-        .map(color_volume, subset=["xGem"]) \
-        .format({"Prijs": "${:.2f}"}, subset=["Prijs"])
-
-    st.dataframe(styled, use_container_width=True, hide_index=True)
-else:
-    st.warning("⚠️ Kon geen data ophalen. Check je internetverbinding.")
-
-# ─── Watchlist ────────────────────────────────────────────────────────────────
-st.divider()
-st.subheader("📋 Watchlist")
-
-watchlist = cfg["watchlist"]
-
-with st.spinner("Watchlist data ophalen..."):
-    wl_data = get_watchlist_data(watchlist)
-
-if not wl_data.empty:
-    display_wl = wl_data.copy()
-    display_wl["Volume"] = display_wl["Volume"].apply(lambda x: f"{x:,}")
-    display_wl["Gem. Volume"] = display_wl["Gem. Volume"].apply(lambda x: f"{x:,}")
-
-    styled_wl = display_wl.style \
-        .map(color_change, subset=["±%"]) \
-        .map(color_volume, subset=["xGem"]) \
-        .format({"Prijs": "${:.2f}"}, subset=["Prijs"])
-
-    st.dataframe(styled_wl, use_container_width=True, hide_index=True)
-
-    # Volume alerts + Telegram push
-    threshold = cfg["volume_threshold"]
-    alerts = wl_data[wl_data["xGem"] >= threshold]
-    if not alerts.empty:
-        st.error(f"🚨 **Volume Alert!** {len(alerts)} ticker(s) boven {threshold}x gemiddeld volume:")
-        for _, row in alerts.iterrows():
-            st.warning(f"**{row['Ticker']}** — Volume: x{row['xGem']:.1f} gemiddelde (${row['Prijs']:.2f})")
-        # Stuur Telegram alerts
-        check_and_alert_volume(wl_data)
-else:
-    st.info("ℹ️ Watchlist is leeg. Voeg tickers toe via de sidebar.")
-
-# ─── Watchlist beheer ─────────────────────────────────────────────────────────
-st.divider()
-st.subheader("⚙️ Watchlist Beheer")
-
-col1, col2, col3, col4 = st.columns([2, 2, 2, 3])
-
+# Metrics row
+col1, col2, col3, col4 = st.columns(4)
 with col1:
-    new_ticker = st.text_input("Ticker toevoegen", placeholder="TSLA", max_chars=10).upper()
-    if st.button("➕ Toevoegen", use_container_width=True) and new_ticker:
-        if new_ticker not in cfg["watchlist"]:
-            cfg["watchlist"].append(new_ticker)
-            save_config(cfg)
-            st.cache_data.clear()
-            st.success(f"✅ {new_ticker} toegevoegd!")
-            st.rerun()
-        else:
-            st.warning(f"⚠️ {new_ticker} staat al in watchlist.")
-
+    st.metric("Watchlist", f"{len(config.get('watchlist', []))} stocks")
 with col2:
-    remove_ticker = st.selectbox("Ticker verwijderen", [""] + cfg["watchlist"])
-    if st.button("❌ Verwijderen", use_container_width=True) and remove_ticker:
-        if remove_ticker in cfg["watchlist"]:
-            cfg["watchlist"].remove(remove_ticker)
-            save_config(cfg)
-            st.cache_data.clear()
-            st.success(f"✅ {remove_ticker} verwijderd!")
-            st.rerun()
-
+    st.metric("Volume drempel", f"{config.get('volume_threshold', 2.0)}x")
 with col3:
-    st.markdown("**Huidige watchlist**")
-    for t in cfg["watchlist"]:
-        st.markdown(f"- {t}")
-
+    st.metric("Top N", config.get("top_n", 3))
 with col4:
-    threshold_val = st.number_input(
-        "Volume threshold (x gem.)",
-        min_value=1.0,
-        max_value=10.0,
-        value=cfg["volume_threshold"],
-        step=0.5,
-    )
-    if threshold_val != cfg["volume_threshold"]:
-        cfg["volume_threshold"] = threshold_val
-        save_config(cfg)
-        st.success(f"✅ Threshold gewijzigd naar {threshold_val}x")
+    telegram_status = "✅ Aan" if config.get("telegram_token") else "❌ Uit"
+    st.metric("Telegram", telegram_status)
 
-# ─── Telegram Config ──────────────────────────────────────────────────────────
-st.divider()
-st.subheader("📱 Telegram Notificaties")
+# ─── Data ophalen ──────────────────────────────────────────────
+with st.spinner("📡 Bezig met ophalen van marktdata..."):
+    df = get_sp500_data()
 
-with st.expander("Telegram instellen", expanded=not cfg.get("telegram_token")):
-    token = st.text_input("Bot Token", value=cfg.get("telegram_token", ""), type="password")
-    chat_id = st.text_input("Chat ID", value=cfg.get("telegram_chat_id", ""))
+if df.empty:
+    st.warning("⚠️ Geen data beschikbaar. De markt is mogelijk gesloten of er is een verbindingsfout.")
+    st.stop()
 
-    if st.button("💾 Opslaan", use_container_width=True):
-        cfg["telegram_token"] = token
-        cfg["telegram_chat_id"] = chat_id
-        save_config(cfg)
-        st.success("✅ Telegram configuratie opgeslagen!")
+# ─── Top 3 cards ───────────────────────────────────────────────
+st.markdown("### 🏆 Top 3 — Hoogste Volume Afwijking")
 
-    if token and chat_id:
-        if st.button("📨 Test notificatie sturen", use_container_width=True):
-            try:
-                url = f"https://api.telegram.org/bot{token}/sendMessage"
-                resp = requests.post(url, json={
-                    "chat_id": chat_id,
-                    "text": "✅ *S&P 500 Tracker* — Test notificatie werkt!",
-                    "parse_mode": "Markdown",
-                }, timeout=10)
-                if resp.status_code == 200:
-                    st.success("✅ Test notificatie verstuurd!")
-                else:
-                    st.error(f"❌ Fout: {resp.text}")
-            except Exception as e:
-                st.error(f"❌ Fout: {e}")
+top3 = df.head(3)
 
-# ─── Footer ───────────────────────────────────────────────────────────────────
-st.divider()
-st.caption(f"S&P 500 Live Tracker • Data: Yahoo Finance • {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+cols = st.columns(3)
+for i, (_, row) in enumerate(top3.iterrows()):
+    info = get_ticker_info(row["ticker"])
+    with cols[i]:
+        direction = "up" if row["change"] >= 0 else "down"
+        price_class = "price-up" if direction == "up" else "price-down"
+        change_class = "change-up" if direction == "up" else "change-down"
+        arrow = "▲" if direction == "up" else "▼"
+
+        st.markdown(f"""
+        <div class='card'>
+            <h3>{info['name']} <span class='badge'>{row['ticker']}</span></h3>
+            <div class='{price_class}'>${row['price']:,.2f}</div>
+            <div class='{change_class}'>{arrow} {abs(row['change']):.2f} ({abs(row['change_pct']):.2f}%)</div>
+            <div class='volume-text'>Volume: {row['volume']:,} · {row['vol_ratio']:.1f}x gemiddelde</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+# ─── Volledige tabel ───────────────────────────────────────────
+st.markdown("### 📊 Alle Resultaten")
+
+display_df = df.copy()
+display_df["price"] = display_df["price"].apply(lambda x: f"${x:,.2f}")
+display_df["change"] = display_df.apply(
+    lambda x: f"▲ {x['change']:.2f}" if x['change'] >= 0 else f"▼ {abs(x['change']):.2f}", axis=1
+)
+display_df["change_pct"] = display_df["change_pct"].apply(lambda x: f"{x:+.2f}%")
+display_df["volume"] = display_df["volume"].apply(lambda x: f"{x:,}")
+display_df["avg_volume"] = display_df["avg_volume"].apply(lambda x: f"{x:,}")
+display_df["vol_ratio"] = display_df["vol_ratio"].apply(lambda x: f"{x:.1f}x")
+display_df["high_volume"] = display_df["high_volume"].apply(lambda x: "🔴 Hoog" if x else "✅ Normaal")
+
+display_df = display_df.rename(columns={
+    "ticker": "Ticker", "price": "Prijs", "change": "Verandering",
+    "change_pct": "%", "volume": "Volume", "avg_volume": "Gem. Volume",
+    "vol_ratio": "Ratio", "high_volume": "Status"
+})
+
+# ─── GEFIXT: .map() i.p.v. .applymap() ────────────────────────
+styled = display_df[["Ticker", "Prijs", "Verandering", "%", "Volume", "Ratio", "Status"]].style.map(
+    lambda v: "color: #ff1744; font-weight: 600" if isinstance(v, str) and "🔴" in v
+    else "color: #00c853; font-weight: 600" if isinstance(v, str) and "▲" in v_
