@@ -287,8 +287,8 @@ if not top3.empty:
     display["Gem. Volume"] = display["Gem. Volume"].apply(lambda x: f"{x:,}")
 
     styled = display.style \
-        .applymap(color_change, subset=["±%"]) \
-        .applymap(color_volume, subset=["xGem"]) \
+        .map(color_change, subset=["±%"]) \
+        .map(color_volume, subset=["xGem"]) \
         .format({"Prijs": "${:.2f}"}, subset=["Prijs"])
 
     st.dataframe(styled, use_container_width=True, hide_index=True)
@@ -310,8 +310,8 @@ if not wl_data.empty:
     display_wl["Gem. Volume"] = display_wl["Gem. Volume"].apply(lambda x: f"{x:,}")
 
     styled_wl = display_wl.style \
-        .applymap(color_change, subset=["±%"]) \
-        .applymap(color_volume, subset=["xGem"]) \
+        .map(color_change, subset=["±%"]) \
+        .map(color_volume, subset=["xGem"]) \
         .format({"Prijs": "${:.2f}"}, subset=["Prijs"])
 
     st.dataframe(styled_wl, use_container_width=True, hide_index=True)
