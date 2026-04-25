@@ -112,36 +112,40 @@ with st.sidebar:
 # ─── 4. MAIN DASHBOARD ────────────────────────────────────────
 st.markdown("<h1 class='main-header'>⚡ Volume Spike Explorer</h1>", unsafe_allow_html=True)
 
-# Selectie menu's (HIER VERVANGEN)
+# STAP 1: Definieer de kolommen en de variabelen
 c1, c2, c3 = st.columns([1, 1, 1])
 
 with c1:
-    # Gebruik cfg["watchlist"] in plaats van alleen watchlist
-    selected_ticker = st.selectbox("Ticker", st.session_state.cfg["watchlist"])
+    # Hier maken we 'sel_ticker' aan
+    sel_ticker = st.selectbox("Ticker", st.session_state.cfg["watchlist"])
 
 with c2:
+    # Hier maken we 'sel_period' aan
     sel_period = st.selectbox("Tijdsbestek", ["1d", "5d", "1mo", "6mo", "1y", "max"], index=1)
 
 with c3:
+    # Hier maken we 'sel_interval' aan
     sel_interval = st.selectbox("Detail (Zoom)", ["1m", "5m", "15m", "60m", "1d", "1wk"], index=2)
 
-# Data ophalen & Plotten
-hist_df, error = get_data_safe(sel_ticker, sel_period, sel_interval)
+# STAP 2: Nu pas de data ophalen (nu sel_ticker, sel_period en sel_interval bestaan)
+with st.spinner(f"Ophalen van {sel_ticker}..."):
+    hist_df, error = get_data_safe(sel_ticker, sel_period, sel_interval)
 
+# STAP 3: De rest van de verwerking (Plotten en Metrics)
 if error:
     st.error(f"⚠️ {error}")
 elif hist_df is not None:
-    # --- FIX: Kolommen platslaan als ze Multi-Index zijn ---
+    # (Houd hier de code aan die de kolommen platslaat en de plot maakt zoals eerder besproken)
     if isinstance(hist_df.columns, pd.MultiIndex):
         hist_df.columns = hist_df.columns.get_level_values(0)
     
-    # Zorg dat de index (tijd) bruikbaar is voor Plotly
     hist_df = hist_df.reset_index()
-    time_col = hist_df.columns[0] # Meestal 'Date' of 'Datetime'
-
-    # --- FIX: Zorg dat mean() een enkel getal is ---
+    time_col = hist_df.columns[0]
+    
     avg_v = float(hist_df['Volume'].mean())
     last_v = int(hist_df['Volume'].iloc[-1])
+    
+    # ... hier komt je fig = go.Figure(...) en st.plotly_chart(fig) ...
     
     # Plotting
     colors = ['#00d4ff'] * (len(hist_df) - 1) + ['#ffc107']
