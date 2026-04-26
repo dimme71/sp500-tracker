@@ -188,7 +188,7 @@ elif hist_df is not None:
         row=2, col=1
     )
     
-    # 4. Layout & Dynamische Schaling
+    # 4. Layout & Dynamische Schaling (Aangepast voor weekenden)
     fig.update_layout(
         template="plotly_dark",
         height=600,
@@ -198,19 +198,17 @@ elif hist_df is not None:
         showlegend=False
     )
     
-    # CRUCIAL: Zorg dat de Y-as van de prijs (Rij 1) ALTIJD inzoomt op de zichtbare data
-    fig.update_yaxes(
-        title_text="Prijs ($)", 
-        row=1, col=1, 
-        fixedrange=False,  # Staat handmatig schuiven toe
-        autorange=True     # Zorgt dat de koers in het midden van het vak komt
+    # Verwijder weekenden uit de tijdlijn
+    fig.update_xaxes(
+        rangebreaks=[
+            dict(bounds=["sat", "mon"]), # Verbergt alles van zaterdag tot maandag
+            # Optioneel: dict(bounds=[16, 9.5], pattern="hour"), # Verbergt uren buiten de beurs (bijv. NYSE 16:00 - 09:30)
+        ]
     )
     
-    fig.update_yaxes(
-        title_text="Volume", 
-        row=2, col=1, 
-        fixedrange=False
-    )
+    # De rest van de Y-as instellingen (zoals eerder besproken)
+    fig.update_yaxes(title_text="Prijs ($)", row=1, col=1, fixedrange=False, autorange=True)
+    fig.update_yaxes(title_text="Volume", row=2, col=1, fixedrange=False)
     
     st.plotly_chart(fig, use_container_width=True)
     
