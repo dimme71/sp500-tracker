@@ -135,47 +135,37 @@ with st.spinner(f"Ophalen van {sel_ticker}..."):
 if error:
     st.error(f"⚠️ {error}")
 elif hist_df is not None:
-    # (Houd hier de code aan die de kolommen platslaat en de plot maakt zoals eerder besproken)
+    # 1. FIX: Kolommen platslaan voor Multi-index (Yahoo Finance update)
     if isinstance(hist_df.columns, pd.MultiIndex):
         hist_df.columns = hist_df.columns.get_level_values(0)
     
+    # Maak index (tijd) bruikbaar
     hist_df = hist_df.reset_index()
-    time_col = hist_df.columns[0]
-    
-    avg_v = float(hist_df['Volume'].mean())
-    last_v = int(hist_df['Volume'].iloc[-1])
-    
-    # ... hier komt je fig = go.Figure(...) en st.plotly_chart(fig) ...
-    
-    # Plotting
-    colors = ['#00d4ff'] * (len(hist_df) - 1) + ['#ffc107']
-    
-    # --- Visualisatie: Prijs (Lijn) + Volume (Bars) ---
+    time_col = hist_df.columns[0] 
+
+    # 2. SUBPLOTS AANMAKEN (Prijs boven, Volume onder)
     from plotly.subplots import make_subplots
-    
-    # 1. Maak twee subplots boven elkaar (rij 1 = Prijs, rij 2 = Volume)
-    # row_heights=[0.7, 0.3] zorgt dat de prijs 70% van de ruimte krijgt
     fig = make_subplots(
         rows=2, cols=1, 
         shared_xaxes=True, 
         vertical_spacing=0.05, 
         row_heights=[0.7, 0.3]
     )
-    
-    # 2. Voeg de Prijs toe aan de bovenste rij (Rij 1)
+
+    # 3. PRIJS GRAFIEK (Rij 1)
     fig.add_trace(
         go.Scatter(
             x=hist_df[time_col], 
             y=hist_df['Close'], 
-            name="Prijs ($)",
+            name="Prijs",
             line=dict(color='#00d4ff', width=2),
             fill='tozeroy',
             fillcolor='rgba(0, 212, 255, 0.1)'
         ),
         row=1, col=1
     )
-    
-    # 3. Voeg het Volume toe aan de onderste rij (Rij 2)
+
+    # 4. VOLUME GRAFIEK (Rij 2)
     colors = ['#4a5568'] * (len(hist_df) - 1) + ['#ffc107']
     fig.add_trace(
         go.Bar(
@@ -187,8 +177,27 @@ elif hist_df is not None:
         ),
         row=2, col=1
     )
-    
-    # 4. Layout & Dynamische Schaling (Aangepast voor weekenden)
+
+    # 5. WEEKENDEN & NACHTEN VERBERGEN + DAGSCHEIDINGEN
+    # We voegen een verticale lijn toe bij elke nieuwe openingsbel (09:30 of 09:00)
+    for timestamp in hist_df[time_col]:
+        if timestamp.hour == 9 and (timestamp.minute == 30 or timestamp.minute == 0):
+            fig.add_vline(
+                x=timestamp, 
+                line_width=1, 
+                line_dash="dash", 
+                line_color="rgba(255, 255, 255, 0.3)",
+                row="all", col=1
+            )
+
+    # 6. LAYOUT CONFIGURATIE
+    fig.update_xaxes(
+        rangebreaks=[
+            dict(bounds=["sat", "mon"]),           # Sla weekenden over
+            dict(bounds=[16, 9.5], pattern="hour") # Sla nachten over (NYSE tijden)
+        ]
+    )
+
     fig.update_layout(
         template="plotly_dark",
         height=600,
@@ -197,20 +206,15 @@ elif hist_df is not None:
         margin=dict(l=0, r=0, t=30, b=0),
         showlegend=False
     )
-    
-    # Verwijder weekenden uit de tijdlijn
-    fig.update_xaxes(
-        rangebreaks=[
-            dict(bounds=["sat", "mon"]), # Verbergt alles van zaterdag tot maandag
-            # Optioneel: dict(bounds=[16, 9.5], pattern="hour"), # Verbergt uren buiten de beurs (bijv. NYSE 16:00 - 09:30)
-        ]
-    )
-    
-    # De rest van de Y-as instellingen (zoals eerder besproken)
+
+    # Automatische zoom op prijs (Rij 1)
     fig.update_yaxes(title_text="Prijs ($)", row=1, col=1, fixedrange=False, autorange=True)
     fig.update_yaxes(title_text="Volume", row=2, col=1, fixedrange=False)
-    
+
+    # 7. TOON DE GRAFIEK
     st.plotly_chart(fig, use_container_width=True)
+
+    # --- Hierna volgen je metrics (current_ratio, m1, m2, etc.) ---
     
     # Metrics
     current_ratio = last_v / avg_v if avg_v > 0 else 0
