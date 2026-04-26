@@ -106,4 +106,63 @@ with st.sidebar:
         new_t = st.text_input("Ticker +").upper().strip()
         if st.button("Voeg toe") and new_t:
             st.session_state.cfg["watchlist"].append(new_t); sync_config(); st.rerun()
-        st.session_state.cfg["intraday_ratio
+        st.session_state.cfg["intraday_ratio"] = st.slider("Spike Ratio", 1.0, 10.0, float(st.session_state.cfg["intraday_ratio"]))
+        if st.button("🔔 Test Telegram"): send_telegram_msg(f"✅ Testbericht voor {sel_ticker}"); st.success("OK!")
+        for t in sorted(st.session_state.cfg["watchlist"]):
+            if st.button(f"🗑️ {t}", key=f"del_{t}"): st.session_state.cfg["watchlist"].remove(t); sync_config(); st.rerun()
+
+# ─── 4. GRAFIEK LOGICA ───────────────────────────────────────
+if error:
+    st.error(f"⚠️ {error}")
+elif hist_df is not None:
+    hist_df = hist_df.copy().reset_index()
+    time_col = hist_df.columns[0]
+    hist_df['x_label'] = hist_df[time_col].dt.strftime('%d %b %H:%M')
+
+    avg_v = float(hist_df['Volume'].mean())
+    vol_colors, spike_detected_now, final_ratio = [], False, 0
+
+    for i in range(len(hist_df)):
+        t, v = hist_df[time_col].iloc[i], hist_df['Volume'].iloc[i]
+        is_opening = (t.hour == 9 and t.minute < 45)
+        is_closing = (t.hour == 15 and t.minute > 45) or (t.hour >= 16)
+        ratio = v / avg_v if avg_v > 0 else 0
+        if ratio >= st.session_state.cfg["intraday_ratio"] and not is_opening and not is_closing:
+            vol_colors.append('#ef5350')
+            if i == len(hist_df) - 1: spike_detected_now, final_ratio = True, ratio
+        else: vol_colors.append('rgba(150, 150, 150, 0.25)')
+
+    if final_ratio == 0: final_ratio = float(hist_df['Volume'].iloc[-1]) / avg_v
+
+    # Zoom 20/80
+    p_min, p_max = hist_df['Close'].min(), hist_df['Close'].max()
+    p_range = (p_max - p_min) if p_max != p_min else 1
+    y_min, y_max = p_min - (0.2 * p_range / 0.6), p_max + (0.2 * p_range / 0.6)
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=hist_df['x_label'], y=hist_df['Close'], line=dict(color='#00d4ff', width=2), fill='tonexty', fillcolor='rgba(0, 212, 255, 0.1)', yaxis="y2"))
+    fig.add_trace(go.Bar(x=hist_df['x_label'], y=hist_df['Volume'], marker_color=vol_colors, yaxis="y"))
+
+    day_indices = hist_df[hist_df[time_col].dt.date != hist_df[time_col].dt.date.shift(1)].index
+    for idx in day_indices:
+        if idx > 0: fig.add_vline(x=idx, line_width=0.8, line_color="rgba(200, 200, 200, 0.2)")
+
+    fig.update_layout(template="plotly_dark", height=600, margin=dict(l=0, r=0, t=10, b=0), showlegend=False,
+        xaxis=dict(type='category', nticks=8, showgrid=False, rangeslider_visible=True),
+        yaxis=dict(range=[0, hist_df['Volume'].max() * 6], visible=False),
+        yaxis2=dict(side="right", showgrid=True, gridcolor='rgba(255,255,255,0.05)', overlaying="y", range=[y_min, y_max], fixedrange=False))
+    
+    st.plotly_chart(fig, use_container_width=True)
+
+    if spike_detected_now:
+        event_id = f"{sel_ticker}_{hist_df[time_col].iloc[-1].strftime('%H:%M')}"
+        if "last_alert_id" not in st.session_state or st.session_state.last_alert_id != event_id:
+            send_telegram_msg(f"<b>🚀 SPIKE: {sel_ticker}</b>\nRatio: {final_ratio:.2f}x\nPrijs: ${d_close:.2f}")
+            st.session_state.last_alert_id = event_id
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Volume", f"{int(hist_df['Volume'].iloc[-1]):,}")
+    m2.metric("Gemiddelde", f"{int(avg_v):,}")
+    m3.metric("Ratio", f"{final_ratio:.2f}x")
+
+st_autorefresh(interval=60 * 1000, key="auto_refresh")
