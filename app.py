@@ -46,6 +46,17 @@ def sync_config():
 
 if 'cfg' not in st.session_state:
     st.session_state.cfg = load_config()
+# ─── Send telegram ───────────────────────────────────────────
+def send_telegram_msg(message):
+    try:
+        token = st.secrets["telegram"]["bot_token"]
+        chat_id = st.secrets["telegram"]["chat_id"]
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        payload = {"chat_id": chat_id, "text": message, "parse_mode": "HTML"}
+        requests.post(url, data=payload)
+    except Exception as e:
+        st.error(f"Telegram fout: {e}")
+
 
 # ─── 2. DATA ENGINE ───────────────────────────────────────────
 @st.cache_data(ttl=300)
@@ -87,6 +98,38 @@ with st.sidebar:
     st.session_state.cfg["intraday_ratio"] = st.slider("Spike Ratio", 1.0, 10.0, float(st.session_state.cfg["intraday_ratio"]))
 
 # ─── 4. MAIN UI ───────────────────────────────────────────────
+# --- Spike Detectie & Kleuring ---
+    avg_v = float(hist_df['Volume'].mean())
+    vol_colors = []
+    spike_detected_now = False
+    final_ratio = 0
+
+    for i in range(len(hist_df)):
+        t = hist_df[time_col].iloc[i]
+        v = hist_df['Volume'].iloc[i]
+        
+        # 15 min filter (Aanpassen aan beurs: 9:45 - 15:45)
+        is_opening = (t.hour == 9 and t.minute < 45) 
+        is_closing = (t.hour == 15 and t.minute > 45) or (t.hour >= 16)
+        
+        ratio = v / avg_v if avg_v > 0 else 0
+        
+        # Is het een spike buiten de verboden zones?
+        is_spike = ratio >= st.session_state.cfg["intraday_ratio"] and not is_opening and not is_closing
+        
+        if is_spike:
+            vol_colors.append('#ef5350') # Rood
+            # Alleen de ALLERLAATSTE bar telt voor een live pushbericht
+            if i == len(hist_df) - 1:
+                spike_detected_now = True
+                final_ratio = ratio
+        else:
+            vol_colors.append('rgba(150, 150, 150, 0.3)')
+
+    if final_ratio == 0:
+        final_ratio = float(hist_df['Volume'].iloc[-1]) / avg_v
+# --- Einde Spike Detectie & Kleuring ---
+
 st.markdown("<h1 class='main-header'>⚡ Volume Spike Explorer</h1>", unsafe_allow_html=True)
 
 c1, c2, c3 = st.columns([1, 1, 1])
@@ -198,6 +241,18 @@ elif hist_df is not None:
     
     st.plotly_chart(fig, use_container_width=True)
 
+    # --- Live Telegram Alert ---
+    if spike_detected_now:
+        alert_msg = f"<b>🚀 VOLUME SPIKE: {sel_ticker}</b>\n\nRatio: <code>{final_ratio:.2f}x</code>\nPrijs: <code>${hist_df['Close'].iloc[-1]:.2f}</code>"
+        st.warning(alert_msg.replace("<b>", "").replace("</b>", "")) # Toon in app zonder HTML
+        
+        # Unieke ID voor dit specifieke moment om dubbele berichten te voorkomen
+        current_event_id = f"{sel_ticker}_{hist_df[time_col].iloc[-1].strftime('%H:%M')}"
+        
+        if "last_alert_id" not in st.session_state or st.session_state.last_alert_id != current_event_id:
+            send_telegram_msg(alert_msg)
+            st.session_state.last_alert_id = current_event_id
+            
     # Metrics
     avg_v = float(hist_df['Volume'].mean())
     last_v = int(hist_df['Volume'].iloc[-1])
