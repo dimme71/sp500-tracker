@@ -13,9 +13,16 @@ st.set_page_config(page_title="Stock Volume Pro", page_icon="📈", layout="wide
 
 st.markdown("""
 <style>
-    .stApp { background-color: #0e1117; color: #ffffff; }
+    .stApp { background-color: #0e1117; color: #ced4da; }
     .main-header { color: #00d4ff; font-size: 2.2rem; font-weight: 700; margin-bottom: 1rem; }
-    .sidebar-metric { background: #1a1d27; padding: 10px; border-radius: 5px; border: 1px solid #3f444e; margin-top: 10px; }
+    .sidebar-text { color: #ced4da; font-size: 0.85rem; }
+    .metric-val { color: #00d4ff; font-weight: bold; }
+    .spike-val { color: #ef5350; font-weight: bold; }
+    .watchlist-card { 
+        background: #1a1d27; padding: 10px; border-radius: 8px; 
+        border-left: 3px solid #3f444e; margin-bottom: 8px;
+    }
+    .sidebar-metric { background: #1a1d27; padding: 12px; border-radius: 8px; border: 1px solid #3f444e; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -25,14 +32,12 @@ def load_config():
     defaults = {"watchlist": ["AAPL", "MSFT", "NVDA", "TSLA"], "intraday_ratio": 3.0}
     if os.path.exists(CONFIG_PATH):
         try:
-            with open(CONFIG_PATH, "r") as f:
-                return json.load(f)
+            with open(CONFIG_PATH, "r") as f: return json.load(f)
         except: pass
     return defaults
 
 def sync_config():
-    with open(CONFIG_PATH, "w") as f:
-        json.dump(st.session_state.cfg, f)
+    with open(CONFIG_PATH, "w") as f: json.dump(st.session_state.cfg, f)
 
 if 'cfg' not in st.session_state:
     st.session_state.cfg = load_config()
@@ -44,185 +49,61 @@ def send_telegram_msg(message):
         url = f"https://api.telegram.org/bot{token}/sendMessage"
         payload = {"chat_id": chat_id, "text": message, "parse_mode": "HTML"}
         requests.post(url, data=payload, timeout=5)
-    except Exception as e:
-        st.error(f"Telegram fout: {e}")
+    except Exception as e: st.error(f"Telegram fout: {e}")
 
 @st.cache_data(ttl=60)
 def get_data_safe(ticker, period, interval):
     try:
         df = yf.download(ticker, period=period, interval=interval, progress=False)
-        if df.empty: return None, "Geen data."
+        if df.empty: return None, "Geen data gevonden."
         return df, None
-    except Exception as e:
-        return None, str(e)
+    except Exception as e: return None, str(e)
 
-# ─── 2. DATA OPHALEN (Bovenaan voor Sidebar Metrics) ──────────
-# We moeten eerst weten welke ticker geselecteerd is om stats in de sidebar te tonen
-# Daarom staan de selectboxen nu vóór de sidebar-logica
+# ─── 2. SELECTOR EN DATA INLADEN ─────────────────────────────
 st.markdown("<h1 class='main-header'>⚡ Volume Spike Explorer</h1>", unsafe_allow_html=True)
 
 c1, c2, c3 = st.columns([1, 1, 1])
-with c1:
-    sel_ticker = st.selectbox("Ticker", st.session_state.cfg["watchlist"])
-with c2:
-    sel_period = st.selectbox("Periode", ["1d", "5d", "1mo", "6mo", "1y"], index=0)
-with c3:
-    sel_interval = st.selectbox("Interval", ["1m", "5m", "15m", "60m", "1d"], index=0)
+with c1: sel_ticker = st.selectbox("Ticker", st.session_state.cfg["watchlist"])
+with c2: sel_period = st.selectbox("Periode", ["1d", "5d", "1mo", "6mo", "1y"], index=0)
+with c3: sel_interval = st.selectbox("Interval", ["1m", "5m", "15m", "60m", "1d"], index=0)
 
 hist_df, error = get_data_safe(sel_ticker, sel_period, sel_interval)
 
-
-# ─── 3. SIDEBAR (Watchlist Overview & Stats) ──────────────────
+# ─── 3. SIDEBAR (Watchlist & Stats) ──────────────────────────
 with st.sidebar:
     st.header("📋 Watchlist Overview")
     
-    # Styling voor lichtere tekst op donker
-    st.markdown("""
-        <style>
-            .sidebar-text { color: #ced4da; font-size: 0.85rem; }
-            .metric-val { color: #00d4ff; font-weight: bold; }
-            .spike-val { color: #ef5350; font-weight: bold; }
-            .watchlist-card { 
-                background: #1a1d27; 
-                padding: 10px; 
-                border-radius: 8px; 
-                border-left: 3px solid #3f444e;
-                margin-bottom: 8px;
-            }
-        </style>
-    """, unsafe_allow_html=True)
-
-    # 1. Beknopt overzicht van ALLE tickers in watchlist
+    # Overzicht alle tickers
     for t in sorted(st.session_state.cfg["watchlist"]):
         try:
-            # We halen lichte data op voor het overzicht (1d)
-            w_data = yf.download(t, period="1d", interval="15m", progress=False)
-            if not w_data.empty:
-                if isinstance(w_data.columns, pd.MultiIndex): w_data.columns = w_data.columns.get_level_values(0)
-                
-                w_last = w_data['Close'].iloc[-1]
-                w_avg_v = w_data['Volume'].mean()
-                w_max_s = (w_data['Volume'] / w_avg_v).max()
-                
-                st.markdown(f"""
-                <div class="watchlist-card">
-                    <div style="display: flex; justify-content: space-between;">
-                        <span style="font-weight:bold; color:white;">{t}</span>
-                        <span class="metric-val">${float(w_last):.2f}</span>
-                    </div>
-                    <div class="sidebar-text">Max Spike: <span class="spike-val">{float(w_max_s):.2f}x</span></div>
-                </div>
-                """, unsafe_allow_html=True)
-        except:
-            st.error(f"Fout bij {t}")
+            w_df = yf.download(t, period="1d", interval="15m", progress=False)
+            if not w_df.empty:
+                if isinstance(w_df.columns, pd.MultiIndex): w_df.columns = w_df.columns.get_level_values(0)
+                w_last = float(w_df['Close'].iloc[-1].iloc[0] if hasattr(w_df['Close'].iloc[-1], 'iloc') else w_df['Close'].iloc[-1])
+                w_max_s = float((w_df['Volume'] / w_df['Volume'].mean()).max())
+                st.markdown(f"""<div class="watchlist-card"><div style="display:flex;justify-content:space-between;">
+                <span style="color:white;">{t}</span><span class="metric-val">${w_last:.2f}</span></div>
+                <div class="sidebar-text">Max Spike: <span class="spike-val">{w_max_s:.2f}x</span></div></div>""", unsafe_allow_html=True)
+        except: pass
 
     st.write("---")
     
-    # 2. Gedetailleerde Stats voor de GESELECTEERDE Main Ticker
+    # Details Main Ticker
     if hist_df is not None and not error:
+        if isinstance(hist_df.columns, pd.MultiIndex): hist_df.columns = hist_df.columns.get_level_values(0)
         st.subheader(f"🔍 Details: {sel_ticker}")
+        d_high = float(hist_df['High'].max().iloc[0] if hasattr(hist_df['High'].max(), 'iloc') else hist_df['High'].max())
+        d_low = float(hist_df['Low'].min().iloc[0] if hasattr(hist_df['Low'].min(), 'iloc') else hist_df['Low'].min())
+        d_close = float(hist_df['Close'].iloc[-1].iloc[0] if hasattr(hist_df['Close'].iloc[-1], 'iloc') else hist_df['Close'].iloc[-1])
         
-        # Gebruik .max().item() om er zeker van te zijn dat we een enkel getal krijgen
-        d_high = float(hist_df['High'].max())
-        d_low = float(hist_df['Low'].min())
-        d_close = float(hist_df['Close'].iloc[-1])
-        
-        col_a, col_b = st.columns(2)
-        # We halen de float() conversie binnen de f-string weg omdat we het hierboven al doen
-        col_a.markdown(f"<div class='sidebar-text'>Hoog<br><b style='color:white;'>${d_high:.2f}</b></div>", unsafe_allow_html=True)
-        col_b.markdown(f"<div class='sidebar-text'>Laag<br><b style='color:white;'>${d_low:.2f}</b></div>", unsafe_allow_html=True)
-        
+        ca, cb = st.columns(2)
+        ca.markdown(f"<div class='sidebar-text'>Hoog<br><b style='color:white;'>${d_high:.2f}</b></div>", unsafe_allow_html=True)
+        cb.markdown(f"<div class='sidebar-text'>Laag<br><b style='color:white;'>${d_low:.2f}</b></div>", unsafe_allow_html=True)
         st.markdown(f"<div class='sidebar-metric' style='margin-top:10px;'><small class='sidebar-text'>Huidig</small><br><b style='color:#00d4ff; font-size:1.4rem;'>${d_close:.2f}</b></div>", unsafe_allow_html=True)
-    
+
     st.write("---")
-    
-    # 3. Controls
-    with st.expander("⚙️ Instellingen & Watchlist Beheer"):
-        new_t = st.text_input("Ticker toevoegen").upper().strip()
+    with st.expander("⚙️ Beheer"):
+        new_t = st.text_input("Ticker +").upper().strip()
         if st.button("Voeg toe") and new_t:
-            if new_t not in st.session_state.cfg["watchlist"]:
-                st.session_state.cfg["watchlist"].append(new_t)
-                sync_config(); st.rerun()
-        
-        st.session_state.cfg["intraday_ratio"] = st.slider("Spike Ratio", 1.0, 10.0, float(st.session_state.cfg["intraday_ratio"]))
-        
-        if st.button("🔔 Test Telegram"):
-            send_telegram_msg(f"✅ Test voor <b>{sel_ticker}</b>"); st.success("Verzonden!")
-
-        st.write("Verwijder tickers:")
-        for t in sorted(st.session_state.cfg["watchlist"]):
-            if st.button(f"🗑️ {t}", key=f"del_sidebar_{t}"):
-                st.session_state.cfg["watchlist"].remove(t); sync_config(); st.rerun()
-
-
-# ─── 4. MAIN UI LOGICA & GRAFIEK ──────────────────────────────
-if error:
-    st.error(f"⚠️ {error}")
-elif hist_df is not None:
-    hist_df = hist_df.reset_index()
-    time_col = hist_df.columns[0]
-    hist_df['x_label'] = hist_df[time_col].dt.strftime('%d %b %H:%M')
-
-    # --- SPIKE DETECTIE ---
-    avg_v = float(hist_df['Volume'].mean())
-    vol_colors = []
-    spike_detected_now = False
-    final_ratio = 0
-
-    for i in range(len(hist_df)):
-        t = hist_df[time_col].iloc[i]
-        v = hist_df['Volume'].iloc[i]
-        is_opening = (t.hour == 9 and t.minute < 45) 
-        is_closing = (t.hour == 15 and t.minute > 45) or (t.hour >= 16)
-        
-        ratio = v / avg_v if avg_v > 0 else 0
-        is_spike = ratio >= st.session_state.cfg["intraday_ratio"] and not is_opening and not is_closing
-        
-        if is_spike:
-            vol_colors.append('#ef5350') 
-            if i == len(hist_df) - 1:
-                spike_detected_now = True
-                final_ratio = ratio
-        else:
-            vol_colors.append('rgba(150, 150, 150, 0.25)')
-
-    if final_ratio == 0:
-        final_ratio = float(hist_df['Volume'].iloc[-1]) / avg_v
-
-    # --- ZOOM 20/80 ---
-    p_min, p_max = hist_df['Close'].min(), hist_df['Close'].max()
-    p_range = (p_max - p_min) if p_max != p_min else 1
-    y_min = p_min - (0.2 * p_range / 0.6)
-    y_max = p_max + (0.2 * p_range / 0.6)
-
-    # --- GRAFIEK ---
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=hist_df['x_label'], y=hist_df['Close'], line=dict(color='#00d4ff', width=2), fill='tonexty', fillcolor='rgba(0, 212, 255, 0.1)', yaxis="y2"))
-    fig.add_trace(go.Bar(x=hist_df['x_label'], y=hist_df['Volume'], marker_color=vol_colors, yaxis="y"))
-
-    day_indices = hist_df[hist_df[time_col].dt.date != hist_df[time_col].dt.date.shift(1)].index
-    for idx in day_indices:
-        if idx > 0: fig.add_vline(x=idx, line_width=0.8, line_color="rgba(200, 200, 200, 0.3)")
-
-    fig.update_layout(
-        template="plotly_dark", height=600, margin=dict(l=0, r=0, t=10, b=0), showlegend=False,
-        xaxis=dict(type='category', nticks=8, showgrid=False, rangeslider_visible=True),
-        yaxis=dict(range=[0, hist_df['Volume'].max() * 6], visible=False),
-        yaxis2=dict(side="right", showgrid=True, gridcolor='rgba(255,255,255,0.05)', overlaying="y", range=[y_min, y_max], fixedrange=False)
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-    # --- ALERTS & METRICS ---
-    if spike_detected_now:
-        alert_msg = f"<b>🚀 VOLUME SPIKE: {sel_ticker}</b>\nRatio: <code>{final_ratio:.2f}x</code>\nPrijs: <code>${hist_df['Close'].iloc[-1]:.2f}</code>"
-        event_id = f"{sel_ticker}_{hist_df[time_col].iloc[-1].strftime('%H:%M')}"
-        if "last_alert_id" not in st.session_state or st.session_state.last_alert_id != event_id:
-            send_telegram_msg(alert_msg)
-            st.session_state.last_alert_id = event_id
-
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Volume", f"{int(hist_df['Volume'].iloc[-1]):,}")
-    m2.metric("Gemiddelde", f"{int(avg_v):,}")
-    m3.metric("Ratio", f"{final_ratio:.2f}x")
-
-st_autorefresh(interval=60 * 1000, key="auto_refresh")
+            st.session_state.cfg["watchlist"].append(new_t); sync_config(); st.rerun()
+        st.session_state.cfg["intraday_ratio
