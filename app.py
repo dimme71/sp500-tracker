@@ -15,6 +15,10 @@ st.markdown("""
 <style>
     .stApp { background-color: #0e1117; color: #ced4da; }
     .main-header { color: #00d4ff; font-size: 2.2rem; font-weight: 700; margin-bottom: 1rem; }
+    /* NIEUW: Metrics onder de grafiek aanpassen */
+    [data-testid="stMetricLabel"] { color: #ced4da !important; }
+    [data-testid="stMetricValue"] { color: #00d4ff !important; }
+    
     .sidebar-text { color: #ced4da; font-size: 0.85rem; }
     .metric-val { color: #00d4ff; font-weight: bold; }
     .spike-val { color: #ef5350; font-weight: bold; }
