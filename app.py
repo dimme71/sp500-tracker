@@ -152,11 +152,17 @@ elif hist_df is not None:
     
     # --- Visualisatie: Prijs (Lijn) + Volume (Bars) ---
     from plotly.subplots import make_subplots
-
-    # Maak een figuur met twee gestapelde subplots (70% prijs, 30% volume)
-    fig = make_subplots(specs=[[{"secondary_y": True}]])
     
-    # 1. Voeg de Koers toe (Lijn)
+    # 1. Maak twee subplots boven elkaar (rij 1 = Prijs, rij 2 = Volume)
+    # row_heights=[0.7, 0.3] zorgt dat de prijs 70% van de ruimte krijgt
+    fig = make_subplots(
+        rows=2, cols=1, 
+        shared_xaxes=True, 
+        vertical_spacing=0.05, 
+        row_heights=[0.7, 0.3]
+    )
+    
+    # 2. Voeg de Prijs toe aan de bovenste rij (Rij 1)
     fig.add_trace(
         go.Scatter(
             x=hist_df[time_col], 
@@ -164,53 +170,47 @@ elif hist_df is not None:
             name="Prijs ($)",
             line=dict(color='#00d4ff', width=2),
             fill='tozeroy',
-            fillcolor='rgba(0, 212, 255, 0.1)' # Lichtblauwe gloed onder de lijn
+            fillcolor='rgba(0, 212, 255, 0.1)'
         ),
-        secondary_y=True,
+        row=1, col=1
     )
     
-    # 2. Voeg het Volume toe (Bars)
-    colors = ['#4a5568'] * (len(hist_df) - 1) + ['#ffc107'] # Grijs voor historisch, Geel voor laatst
+    # 3. Voeg het Volume toe aan de onderste rij (Rij 2)
+    colors = ['#4a5568'] * (len(hist_df) - 1) + ['#ffc107']
     fig.add_trace(
         go.Bar(
             x=hist_df[time_col], 
             y=hist_df['Volume'], 
             name="Volume",
             marker_color=colors,
-            opacity=0.5
+            opacity=0.8
         ),
-        secondary_y=False,
+        row=2, col=1
     )
     
-    # Layout aanpassingen
-        # Layout aanpassingen met dynamische schaling
+    # 4. Layout & Dynamische Schaling
     fig.update_layout(
         template="plotly_dark",
-        height=550,
+        height=600,
         xaxis_rangeslider_visible=True,
+        xaxis_rangeslider_thickness=0.05,
         margin=dict(l=0, r=0, t=30, b=0),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        
-        # Volume as (Y1) - meestal laten we deze op 0 beginnen
-        yaxis=dict(
-            title="Volume", 
-            showgrid=False,
-            fixedrange=False
-        ),
-        
-        # Prijs as (Y2) - DEZE PASST ZICH NU AAN BIJ ZOOMEN
-        yaxis2=dict(
-            title="Prijs ($)", 
-            side="right", 
-            showgrid=True, 
-            gridcolor="#2d3748",
-            fixedrange=False,  # Zorgt dat je handmatig kunt schalen als nodig
-            autorange=True,    # Automatische schaling op basis van data
-        )
+        showlegend=False
     )
     
-    # Extra toevoeging voor soepele zoom-ervaring
-    fig.update_xaxes(rangeslider_thickness=0.1)
+    # CRUCIAL: Zorg dat de Y-as van de prijs (Rij 1) ALTIJD inzoomt op de zichtbare data
+    fig.update_yaxes(
+        title_text="Prijs ($)", 
+        row=1, col=1, 
+        fixedrange=False,  # Staat handmatig schuiven toe
+        autorange=True     # Zorgt dat de koers in het midden van het vak komt
+    )
+    
+    fig.update_yaxes(
+        title_text="Volume", 
+        row=2, col=1, 
+        fixedrange=False
+    )
     
     st.plotly_chart(fig, use_container_width=True)
     
