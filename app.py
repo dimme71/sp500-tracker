@@ -110,46 +110,72 @@ elif hist_df is not None:
     hist_df = hist_df.reset_index()
     time_col = hist_df.columns[0]
 
-    # Subplots maken
-    fig = make_subplots(
-        rows=2, cols=1, 
-        shared_xaxes=True, 
-        vertical_spacing=0.05, 
-        row_heights=[0.7, 0.3]
+    # --- Visualisatie: Yahoo Finance Style ---
+    # We gebruiken geen make_subplots meer, maar één figuur met twee assen
+    fig = go.Figure()
+    
+    # 1. De Prijs (Area Chart)
+    fig.add_trace(
+        go.Scatter(
+            x=hist_df[time_col], 
+            y=hist_df['Close'], 
+            name="Prijs",
+            line=dict(color='#00d4ff', width=1.5),
+            fill='tozeroy', # Vult tot aan de 0-lijn
+            fillcolor='rgba(0, 212, 255, 0.15)', # Zachte blauwe gloed
+            yaxis="y2" # Koppelen aan de rechter-as
+        )
     )
-
-    # Prijs Trace
-    fig.add_trace(go.Scatter(
-        x=hist_df[time_col], y=hist_df['Close'], 
-        name="Prijs", line=dict(color='#00d4ff', width=2),
-        fill='tozeroy', fillcolor='rgba(0, 212, 255, 0.1)'
-    ), row=1, col=1)
-
-    # Volume Trace
-    colors = ['#4a5568'] * (len(hist_df) - 1) + ['#ffc107']
-    fig.add_trace(go.Bar(
-        x=hist_df[time_col], y=hist_df['Volume'], 
-        name="Volume", marker_color=colors, opacity=0.8
-    ), row=2, col=1)
-
-    # Dagscheidingen (Verticale lijnen)
+    
+    # 2. Het Volume (Bars onderaan)
+    fig.add_trace(
+        go.Bar(
+            x=hist_df[time_col], 
+            y=hist_df['Volume'], 
+            name="Volume",
+            marker_color='rgba(200, 200, 200, 0.4)', # Lichtgrijs en transparant
+            yaxis="y" # Koppelen aan de linker-as
+        )
+    )
+    
+    # 3. Dagscheidingen (Verticale lijnen)
     for timestamp in hist_df[time_col]:
         if timestamp.hour == 9 and (timestamp.minute == 30 or timestamp.minute == 0):
-            fig.add_vline(x=timestamp, line_width=1, line_dash="dash", line_color="rgba(255,255,255,0.2)", row="all", col=1)
-
-    # X-As Config (Skip weekenden en nachten)
-    fig.update_xaxes(
-        rangebreaks=[
-            dict(bounds=["sat", "mon"]), 
-            dict(bounds=[16, 9.5], pattern="hour")
-        ]
+            fig.add_vline(x=timestamp, line_width=0.8, line_dash="dot", line_color="rgba(255,255,255,0.2)")
+    
+    # 4. Layout configuratie voor de "Yahoo Look"
+    fig.update_layout(
+        template="plotly_dark",
+        height=600,
+        margin=dict(l=0, r=0, t=30, b=0),
+        showlegend=False,
+        xaxis=dict(
+            showgrid=True, 
+            gridcolor='rgba(255,255,255,0.05)',
+            rangebreaks=[
+                dict(bounds=["sat", "mon"]), # Geen weekenden
+                dict(bounds=[16, 9.5], pattern="hour") # Geen nachten
+            ],
+            rangeslider_visible=True,
+            rangeslider_thickness=0.05
+        ),
+        # Linker-as (Volume) - we maken deze 'onzichtbaar' groot zodat bars onderin blijven
+        yaxis=dict(
+            showgrid=False,
+            range=[0, hist_df['Volume'].max() * 4], # Volume neemt maar 25% van de hoogte in
+            visible=False
+        ),
+        # Rechter-as (Prijs)
+        yaxis2=dict(
+            side="right",
+            showgrid=True,
+            gridcolor='rgba(255,255,255,0.05)',
+            fixedrange=False,
+            autorange=True,
+            overlaying="y" # Dit zorgt dat de prijs OVER het volume ligt
+        )
     )
-
-    # Layout & Schaling
-    fig.update_layout(template="plotly_dark", height=600, xaxis_rangeslider_visible=True, margin=dict(l=0, r=0, t=30, b=0), showlegend=False)
-    fig.update_yaxes(title_text="Prijs ($)", row=1, col=1, fixedrange=False, autorange=True)
-    fig.update_yaxes(title_text="Volume", row=2, col=1, fixedrange=False)
-
+    
     st.plotly_chart(fig, use_container_width=True)
 
     # Metrics
