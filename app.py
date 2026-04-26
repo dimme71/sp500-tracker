@@ -90,12 +90,18 @@ with st.sidebar:
 st.markdown("<h1 class='main-header'>⚡ Volume Spike Explorer</h1>", unsafe_allow_html=True)
 
 c1, c2, c3 = st.columns([1, 1, 1])
+
 with c1:
+    # We selecteren de ticker uit de watchlist
     sel_ticker = st.selectbox("Ticker", st.session_state.cfg["watchlist"])
+
 with c2:
-    sel_period = st.selectbox("Periode", ["1d", "5d", "1mo", "6mo", "1y", "max"], index=1)
+    # Periode: "1d" is de eerste optie (index 0)
+    sel_period = st.selectbox("Periode", ["1d", "5d", "1mo", "6mo", "1y", "max"], index=0)
+
 with c3:
-    sel_interval = st.selectbox("Interval (Zoom)", ["1m", "5m", "15m", "60m", "1d", "1wk"], index=2)
+    # Interval: "1m" is de eerste optie (index 0)
+    sel_interval = st.selectbox("Interval (Zoom)", ["1m", "5m", "15m", "60m", "1d", "1wk"], index=0)
 
 hist_df, error = get_data_safe(sel_ticker, sel_period, sel_interval)
 
