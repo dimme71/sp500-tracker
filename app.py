@@ -151,49 +151,49 @@ elif hist_df is not None:
     colors = ['#00d4ff'] * (len(hist_df) - 1) + ['#ffc107']
     
     # --- Visualisatie: Prijs (Lijn) + Volume (Bars) ---
-from plotly.subplots import make_subplots
+    from plotly.subplots import make_subplots
 
-# Maak een figuur met twee gestapelde subplots (70% prijs, 30% volume)
-fig = make_subplots(specs=[[{"secondary_y": True}]])
-
-# 1. Voeg de Koers toe (Lijn)
-fig.add_trace(
-    go.Scatter(
-        x=hist_df[time_col], 
-        y=hist_df['Close'], 
-        name="Prijs ($)",
-        line=dict(color='#00d4ff', width=2),
-        fill='tozeroy',
-        fillcolor='rgba(0, 212, 255, 0.1)' # Lichtblauwe gloed onder de lijn
-    ),
-    secondary_y=True,
-)
-
-# 2. Voeg het Volume toe (Bars)
-colors = ['#4a5568'] * (len(hist_df) - 1) + ['#ffc107'] # Grijs voor historisch, Geel voor laatst
-fig.add_trace(
-    go.Bar(
-        x=hist_df[time_col], 
-        y=hist_df['Volume'], 
-        name="Volume",
-        marker_color=colors,
-        opacity=0.5
-    ),
-    secondary_y=False,
-)
-
-# Layout aanpassingen
-fig.update_layout(
-    template="plotly_dark",
-    height=550,
-    xaxis_rangeslider_visible=True,
-    margin=dict(l=0, r=0, t=30, b=0),
-    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-    yaxis=dict(title="Volume", showgrid=False),
-    yaxis2=dict(title="Prijs ($)", side="right", showgrid=True, gridcolor="#2d3748")
-)
-
-st.plotly_chart(fig, use_container_width=True)
+    # Maak een figuur met twee gestapelde subplots (70% prijs, 30% volume)
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    
+    # 1. Voeg de Koers toe (Lijn)
+    fig.add_trace(
+        go.Scatter(
+            x=hist_df[time_col], 
+            y=hist_df['Close'], 
+            name="Prijs ($)",
+            line=dict(color='#00d4ff', width=2),
+            fill='tozeroy',
+            fillcolor='rgba(0, 212, 255, 0.1)' # Lichtblauwe gloed onder de lijn
+        ),
+        secondary_y=True,
+    )
+    
+    # 2. Voeg het Volume toe (Bars)
+    colors = ['#4a5568'] * (len(hist_df) - 1) + ['#ffc107'] # Grijs voor historisch, Geel voor laatst
+    fig.add_trace(
+        go.Bar(
+            x=hist_df[time_col], 
+            y=hist_df['Volume'], 
+            name="Volume",
+            marker_color=colors,
+            opacity=0.5
+        ),
+        secondary_y=False,
+    )
+    
+    # Layout aanpassingen
+    fig.update_layout(
+        template="plotly_dark",
+        height=550,
+        xaxis_rangeslider_visible=True,
+        margin=dict(l=0, r=0, t=30, b=0),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        yaxis=dict(title="Volume", showgrid=False),
+        yaxis2=dict(title="Prijs ($)", side="right", showgrid=True, gridcolor="#2d3748")
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
     
     # Metrics
     current_ratio = last_v / avg_v if avg_v > 0 else 0
