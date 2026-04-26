@@ -96,70 +96,57 @@ with st.sidebar:
 
     st.write("---")
     st.session_state.cfg["intraday_ratio"] = st.slider("Spike Ratio", 1.0, 10.0, float(st.session_state.cfg["intraday_ratio"]))
-
-# ─── 4. MAIN UI ───────────────────────────────────────────────
-# --- Spike Detectie & Kleuring ---
-    avg_v = float(hist_df['Volume'].mean())
-    vol_colors = []
-    spike_detected_now = False
-    final_ratio = 0
-
-    for i in range(len(hist_df)):
-        t = hist_df[time_col].iloc[i]
-        v = hist_df['Volume'].iloc[i]
-        
-        # 15 min filter (Aanpassen aan beurs: 9:45 - 15:45)
-        is_opening = (t.hour == 9 and t.minute < 45) 
-        is_closing = (t.hour == 15 and t.minute > 45) or (t.hour >= 16)
-        
-        ratio = v / avg_v if avg_v > 0 else 0
-        
-        # Is het een spike buiten de verboden zones?
-        is_spike = ratio >= st.session_state.cfg["intraday_ratio"] and not is_opening and not is_closing
-        
-        if is_spike:
-            vol_colors.append('#ef5350') # Rood
-            # Alleen de ALLERLAATSTE bar telt voor een live pushbericht
-            if i == len(hist_df) - 1:
-                spike_detected_now = True
-                final_ratio = ratio
-        else:
-            vol_colors.append('rgba(150, 150, 150, 0.3)')
-
-    if final_ratio == 0:
-        final_ratio = float(hist_df['Volume'].iloc[-1]) / avg_v
-# --- Einde Spike Detectie & Kleuring ---
-
-st.markdown("<h1 class='main-header'>⚡ Volume Spike Explorer</h1>", unsafe_allow_html=True)
-
-c1, c2, c3 = st.columns([1, 1, 1])
-
-with c1:
-    # We selecteren de ticker uit de watchlist
-    sel_ticker = st.selectbox("Ticker", st.session_state.cfg["watchlist"])
-
-with c2:
-    # Periode: "1d" is de eerste optie (index 0)
-    sel_period = st.selectbox("Periode", ["1d", "5d", "1mo", "6mo", "1y", "max"], index=0)
-
-with c3:
-    # Interval: "1m" is de eerste optie (index 0)
-    sel_interval = st.selectbox("Interval (Zoom)", ["1m", "5m", "15m", "60m", "1d", "1wk"], index=0)
-
-hist_df, error = get_data_safe(sel_ticker, sel_period, sel_interval)
-
-if error:
-    st.error(f"⚠️ {error}")
-    st.info("Tip: Kies een kortere periode voor gedetailleerde charts.")
-elif hist_df is not None:
-    # Data opschonen (Multi-index fix)
-    if isinstance(hist_df.columns, pd.MultiIndex):
-        hist_df.columns = hist_df.columns.get_level_values(0)
     
-    hist_df = hist_df.reset_index()
-    time_col = hist_df.columns[0]
-
-    # --- Visualisatie: Gecentreerde Zoom zonder Sluitingstijden ---
+    # ─── 4. MAIN UI ───────────────────────────────────────────────
+    st.markdown("<h1 class='main-header'>⚡ Volume Spike Explorer</h1>", unsafe_allow_html=True)
+    
+    # ... (je selectboxen voor ticker, periode, interval) ...
+    
+    hist_df, error = get_data_safe(sel_ticker, sel_period, sel_interval)
+    
+    if error:
+        st.error(f"⚠️ {error}")
+    elif hist_df is not None:
+        # --- STAP 1: DATA CLEANUP (Cruciaal voor de 'Volume' error) ---
+        if isinstance(hist_df.columns, pd.MultiIndex):
+            hist_df.columns = hist_df.columns.get_level_values(0)
+        
+        hist_df = hist_df.reset_index()
+        time_col = hist_df.columns[0] # Meestal 'Date' of 'Datetime'
+    
+        # --- STAP 2: SPIKE DETECTIE LOGICA (Nu veilig) ---
+        avg_v = float(hist_df['Volume'].mean())
+        vol_colors = []
+        spike_detected_now = False
+        final_ratio = 0
+    
+        for i in range(len(hist_df)):
+            t = hist_df[time_col].iloc[i]
+            v = hist_df['Volume'].iloc[i]
+            
+            # 15 min filter
+            is_opening = (t.hour == 9 and t.minute < 45) 
+            is_closing = (t.hour == 15 and t.minute > 45) or (t.hour >= 16)
+            
+            ratio = v / avg_v if avg_v > 0 else 0
+            is_spike = ratio >= st.session_state.cfg["intraday_ratio"] and not is_opening and not is_closing
+            
+            if is_spike:
+                vol_colors.append('#ef5350') 
+                if i == len(hist_df) - 1:
+                    spike_detected_now = True
+                    final_ratio = ratio
+            else:
+                vol_colors.append('rgba(150, 150, 150, 0.3)')
+    
+        # --- STAP 3: BEREKEN ZOOM (20/80%) ---
+        p_min, p_max = hist_df['Close'].min(), hist_df['Close'].max()
+        p_range = (p_max - p_min) if p_max != p_min else 1
+        y_min = p_min - (0.2 * p_range / 0.6)
+        y_max = p_max + (0.2 * p_range / 0.6)
+    
+        # --- STAP 4: GRAFIEK BOUWEN ---
+        # (Plaats hier de fig = go.Figure() code die we eerder hebben gemaakt)
 
     # 1. Voorbereiding: Gebruik een string-as om gaten te voorkomen
     # We maken een hulpkolom voor de labels op de X-as
