@@ -38,8 +38,15 @@ def load_config():
     defaults = {"watchlist": ["AAPL", "MSFT", "NVDA", "TSLA"], "intraday_ratio": 3.0}
     if os.path.exists(CONFIG_PATH):
         try:
-            with open(CONFIG_PATH, "r") as f: return json.load(f)
-        except: pass
+            with open(CONFIG_PATH, "r") as f:
+                saved = json.load(f)
+                # Zorg dat alle standaardwaarden aanwezig zijn (Merge)
+                for key, value in defaults.items():
+                    if key not in saved:
+                        saved[key] = value
+                return saved
+        except:
+            return defaults
     return defaults
 
 def sync_config():
