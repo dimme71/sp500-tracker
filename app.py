@@ -71,49 +71,86 @@ with c3:
 
 hist_df, error = get_data_safe(sel_ticker, sel_period, sel_interval)
 
-# ─── 3. SIDEBAR ───────────────────────────────────────────────
-with st.sidebar:
-    st.header("📋 Watchlist")
-    new_t = st.text_input("Ticker toevoegen").upper().strip()
-    if st.button("Voeg toe") and new_t:
-        if new_t not in st.session_state.cfg["watchlist"]:
-            st.session_state.cfg["watchlist"].append(new_t)
-            sync_config()
-            st.rerun()
 
+# ─── 3. SIDEBAR (Watchlist Overview & Stats) ──────────────────
+with st.sidebar:
+    st.header("📋 Watchlist Overview")
+    
+    # Styling voor lichtere tekst op donker
+    st.markdown("""
+        <style>
+            .sidebar-text { color: #ced4da; font-size: 0.85rem; }
+            .metric-val { color: #00d4ff; font-weight: bold; }
+            .spike-val { color: #ef5350; font-weight: bold; }
+            .watchlist-card { 
+                background: #1a1d27; 
+                padding: 10px; 
+                border-radius: 8px; 
+                border-left: 3px solid #3f444e;
+                margin-bottom: 8px;
+            }
+        </style>
+    """, unsafe_allow_html=True)
+
+    # 1. Beknopt overzicht van ALLE tickers in watchlist
     for t in sorted(st.session_state.cfg["watchlist"]):
-        cols = st.columns([4, 1])
-        cols[0].write(t)
-        if cols[1].button("🗑️", key=f"del_{t}"):
-            st.session_state.cfg["watchlist"].remove(t)
-            sync_config()
-            st.rerun()
+        try:
+            # We halen lichte data op voor het overzicht (1d)
+            w_data = yf.download(t, period="1d", interval="15m", progress=False)
+            if not w_data.empty:
+                if isinstance(w_data.columns, pd.MultiIndex): w_data.columns = w_data.columns.get_level_values(0)
+                
+                w_last = w_data['Close'].iloc[-1]
+                w_avg_v = w_data['Volume'].mean()
+                w_max_s = (w_data['Volume'] / w_avg_v).max()
+                
+                st.markdown(f"""
+                <div class="watchlist-card">
+                    <div style="display: flex; justify-content: space-between;">
+                        <span style="font-weight:bold; color:white;">{t}</span>
+                        <span class="metric-val">${float(w_last):.2f}</span>
+                    </div>
+                    <div class="sidebar-text">Max Spike: <span class="spike-val">{float(w_max_s):.2f}x</span></div>
+                </div>
+                """, unsafe_allow_html=True)
+        except:
+            st.error(f"Fout bij {t}")
 
     st.write("---")
-    st.session_state.cfg["intraday_ratio"] = st.slider("Spike Ratio", 1.0, 10.0, float(st.session_state.cfg["intraday_ratio"]))
     
-    if st.button("🔔 Test Telegram"):
-        send_telegram_msg(f"✅ Testbericht van Stock Volume Pro voor <b>{sel_ticker}</b>")
-        st.success("Test verzonden!")
-
-    # Sidebar Stats
+    # 2. Gedetailleerde Stats voor de GESELECTEERDE Main Ticker
     if hist_df is not None and not error:
-        if isinstance(hist_df.columns, pd.MultiIndex):
-            hist_df.columns = hist_df.columns.get_level_values(0)
+        st.subheader(f"🔍 Details: {sel_ticker}")
+        d_high = hist_df['High'].max()
+        d_low = hist_df['Low'].min()
+        d_close = hist_df['Close'].iloc[-1]
         
-        last_price = hist_df['Close'].iloc[-1]
-        max_spike = (hist_df['Volume'] / hist_df['Volume'].mean()).max()
+        col_a, col_b = st.columns(2)
+        col_a.markdown(f"<div class='sidebar-text'>Hoog<br><b style='color:white;'>${float(d_high):.2f}</b></div>", unsafe_allow_html=True)
+        col_b.markdown(f"<div class='sidebar-text'>Laag<br><b style='color:white;'>${float(d_low):.2f}</b></div>", unsafe_allow_html=True)
         
-        st.markdown(f"""
-        <div class='sidebar-metric'>
-            <small>Huidige Prijs</small><br>
-            <b style='color:#00d4ff; font-size:1.2rem;'>${last_price:.2f}</b>
-        </div>
-        <div class='sidebar-metric'>
-            <small>Max Volume Spike (Periode)</small><br>
-            <b style='color:#ef5350; font-size:1.2rem;'>{max_spike:.2f}x</b>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown(f"<div class='sidebar-metric' style='margin-top:10px;'><small class='sidebar-text'>Huidig</small><br><b style='color:#00d4ff; font-size:1.4rem;'>${float(d_close):.2f}</b></div>", unsafe_allow_html=True)
+
+    st.write("---")
+    
+    # 3. Controls
+    with st.expander("⚙️ Instellingen & Watchlist Beheer"):
+        new_t = st.text_input("Ticker toevoegen").upper().strip()
+        if st.button("Voeg toe") and new_t:
+            if new_t not in st.session_state.cfg["watchlist"]:
+                st.session_state.cfg["watchlist"].append(new_t)
+                sync_config(); st.rerun()
+        
+        st.session_state.cfg["intraday_ratio"] = st.slider("Spike Ratio", 1.0, 10.0, float(st.session_state.cfg["intraday_ratio"]))
+        
+        if st.button("🔔 Test Telegram"):
+            send_telegram_msg(f"✅ Test voor <b>{sel_ticker}</b>"); st.success("Verzonden!")
+
+        st.write("Verwijder tickers:")
+        for t in sorted(st.session_state.cfg["watchlist"]):
+            if st.button(f"🗑️ {t}", key=f"del_sidebar_{t}"):
+                st.session_state.cfg["watchlist"].remove(t); sync_config(); st.rerun()
+
 
 # ─── 4. MAIN UI LOGICA & GRAFIEK ──────────────────────────────
 if error:
