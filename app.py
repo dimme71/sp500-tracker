@@ -110,69 +110,83 @@ elif hist_df is not None:
     hist_df = hist_df.reset_index()
     time_col = hist_df.columns[0]
 
-    # --- Visualisatie: Yahoo Style met Category Scaling ---
+    # --- Visualisatie: Custom Zoom & Day Separators ---
+
+    # 1. Bereken de schaal voor de Y-as (Prijs)
+    # We willen de prijs tussen 20% en 80% van de grafiekhoogte hebben
+    p_min = hist_df['Close'].min()
+    p_max = hist_df['Close'].max()
+    p_range = p_max - p_min
+    
+    # Wiskundige correctie:
+    # De totale hoogte van de as moet groter zijn zodat de prijs 'gecentreerd' is
+    # (0.8 - 0.2 = 0.6. De prijsmarge beslaat dus 60% van het scherm)
+    y_min = p_min - (0.2 * p_range / 0.6)
+    y_max = p_max + (0.2 * p_range / 0.6)
+    
     fig = go.Figure()
     
-    # 1. Prijs (Area Chart) - Gekoppeld aan de rechteras (y2)
+    # 2. De Prijs (Area Chart)
     fig.add_trace(
         go.Scatter(
-            x=hist_df[time_col].dt.strftime('%d %b %H:%M'), # Gebruik tekstlabels voor category-scaling
+            x=hist_df[time_col], 
             y=hist_df['Close'], 
             name="Prijs",
-            line=dict(color='#00d4ff', width=2),
+            line=dict(color='#00d4ff', width=1.5),
             fill='tonexty', 
-            fillcolor='rgba(0, 212, 255, 0.15)',
+            fillcolor='rgba(0, 212, 255, 0.12)',
             yaxis="y2" 
         )
     )
     
-    # 2. Volume (Bars) - Gekoppeld aan de linkeras (y)
-    vol_colors = ['rgba(38, 166, 154, 0.4)' if (i == 0 or hist_df['Close'].iloc[i] >= hist_df['Close'].iloc[i-1]) 
-                  else 'rgba(239, 83, 80, 0.4)' for i in range(len(hist_df))]
-    
+    # 3. Het Volume (Bars onderaan)
     fig.add_trace(
         go.Bar(
-            x=hist_df[time_col].dt.strftime('%d %b %H:%M'), 
+            x=hist_df[time_col], 
             y=hist_df['Volume'], 
-            marker_color=vol_colors,
+            marker_color='rgba(150, 150, 150, 0.2)', # Zeer subtiel grijs
             yaxis="y"
         )
     )
     
-    # 3. Dagscheidingen (Verticale lijnen)
-    # We zoeken de indexen waar een nieuwe dag begint voor de verticale lijnen
-    day_starts = hist_df[hist_df[time_col].dt.hour == 9].index
-    for idx in day_starts:
-        fig.add_vline(x=idx, line_width=0.8, line_dash="dot", line_color="rgba(255,255,255,0.2)")
+    # 4. Verticale dagscheidingen (Lichtgrijs & Dun)
+    # We trekken de lijn door het hele bereik (row="all")
+    for timestamp in hist_df[time_col].dt.normalize().unique():
+        # We zetten de lijn aan het begin van de dag (00:00 of eerste beschikbare timestamp)
+        fig.add_vline(
+            x=timestamp, 
+            line_width=0.5, 
+            line_color="rgba(200, 200, 200, 0.2)" # Lichtgrijs
+        )
     
-    # 4. Layout: Focus op Zoom en Schaal
+    # 5. Layout & As-instellingen
     fig.update_layout(
         template="plotly_dark",
         height=600,
-        margin=dict(l=0, r=0, t=30, b=0),
+        margin=dict(l=0, r=0, t=10, b=0),
         showlegend=False,
         xaxis=dict(
-            type='category', # DIT SCHAALT DE DAGEN/UREN TEGEN ELKAAR (geen gaten)
-            tickangle=0,
-            nticks=10,
             showgrid=False,
+            rangebreaks=[
+                dict(bounds=["sat", "mon"]), 
+                dict(bounds=[16, 9.5], pattern="hour")
+            ],
             rangeslider_visible=True,
-            rangeslider_thickness=0.05
+            rangeslider_thickness=0.04
         ),
-        # Linker-as (Volume): Geparkeerd onderin
+        # Volume-as (onzichtbaar geparkeerd)
         yaxis=dict(
             range=[0, hist_df['Volume'].max() * 6], 
             visible=False
         ),
-        # Rechter-as (Prijs): Maximaal ingezoomd op waarde
+        # Prijs-as (Gecentreerd op 20% - 80%)
         yaxis2=dict(
             side="right",
             showgrid=True,
-            gridcolor='rgba(255,255,255,0.05)',
+            gridcolor='rgba(255,255,255,0.03)',
             overlaying="y",
-            anchor="x",
-            fixedrange=False,
-            autorange=True # ZOOMT IN OP DE WAARDE
+            range=[y_min, y_max], # DEZE RANGE FORCEERT DE ZOOM
+            fixedrange=False
         )
     )
     
