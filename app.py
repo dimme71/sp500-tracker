@@ -15,7 +15,7 @@ st.markdown("""
 <style>
     .stApp { background-color: #0e1117; color: #ced4da; }
     .main-header { color: #00d4ff; font-size: 2.2rem; font-weight: 700; margin-bottom: 1rem; }
-    * Labels boven selectboxen (Ticker, Periode, Interval) */
+    /* Labels boven selectboxen (Ticker, Periode, Interval) */
     [data-testid="stWidgetLabel"] p { color: #ced4da !important; }
     /* NIEUW: Metrics onder de grafiek aanpassen */
     [data-testid="stMetricLabel"] { color: #ced4da !important; }
