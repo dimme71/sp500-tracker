@@ -110,82 +110,82 @@ elif hist_df is not None:
     hist_df = hist_df.reset_index()
     time_col = hist_df.columns[0]
 
-    # --- Visualisatie: Custom Zoom & Day Separators ---
+    # --- Visualisatie: Gecentreerde Zoom zonder Sluitingstijden ---
 
-    # 1. Bereken de schaal voor de Y-as (Prijs)
-    # We willen de prijs tussen 20% en 80% van de grafiekhoogte hebben
+    # 1. Voorbereiding: Gebruik een string-as om gaten te voorkomen
+    # We maken een hulpkolom voor de labels op de X-as
+    hist_df['x_label'] = hist_df[time_col].dt.strftime('%d %b %H:%M')
+    
+    # 2. Bereken de schaal (Min op 20%, Max op 80%)
     p_min = hist_df['Close'].min()
     p_max = hist_df['Close'].max()
-    p_range = p_max - p_min
+    p_range = p_max - p_min if p_max != p_min else 1
     
-    # Wiskundige correctie:
-    # De totale hoogte van de as moet groter zijn zodat de prijs 'gecentreerd' is
-    # (0.8 - 0.2 = 0.6. De prijsmarge beslaat dus 60% van het scherm)
+    # De formule voor de marges
     y_min = p_min - (0.2 * p_range / 0.6)
     y_max = p_max + (0.2 * p_range / 0.6)
     
     fig = go.Figure()
     
-    # 2. De Prijs (Area Chart)
+    # 3. Prijs (Area)
     fig.add_trace(
         go.Scatter(
-            x=hist_df[time_col], 
+            x=hist_df['x_label'], 
             y=hist_df['Close'], 
             name="Prijs",
-            line=dict(color='#00d4ff', width=1.5),
+            line=dict(color='#00d4ff', width=2),
             fill='tonexty', 
-            fillcolor='rgba(0, 212, 255, 0.12)',
+            fillcolor='rgba(0, 212, 255, 0.15)',
             yaxis="y2" 
         )
     )
     
-    # 3. Het Volume (Bars onderaan)
+    # 4. Volume (Bars)
     fig.add_trace(
         go.Bar(
-            x=hist_df[time_col], 
+            x=hist_df['x_label'], 
             y=hist_df['Volume'], 
-            marker_color='rgba(150, 150, 150, 0.2)', # Zeer subtiel grijs
+            marker_color='rgba(150, 150, 150, 0.25)',
             yaxis="y"
         )
     )
     
-    # 4. Verticale dagscheidingen (Lichtgrijs & Dun)
-    # We trekken de lijn door het hele bereik (row="all")
-    for timestamp in hist_df[time_col].dt.normalize().unique():
-        # We zetten de lijn aan het begin van de dag (00:00 of eerste beschikbare timestamp)
-        fig.add_vline(
-            x=timestamp, 
-            line_width=0.5, 
-            line_color="rgba(200, 200, 200, 0.2)" # Lichtgrijs
-        )
+    # 5. Verticale lijnen (Dagscheidingen)
+    # We zoeken de indexen waar de dag verandert
+    day_indices = hist_df[hist_df[time_col].dt.date != hist_df[time_col].dt.date.shift(1)].index
+    for idx in day_indices:
+        if idx > 0: # Sla de allereerste bar over
+            fig.add_vline(
+                x=idx, 
+                line_width=0.8, 
+                line_color="rgba(200, 200, 200, 0.3)", 
+                line_dash="solid"
+            )
     
-    # 5. Layout & As-instellingen
+    # 6. Layout & Schaling
     fig.update_layout(
         template="plotly_dark",
         height=600,
         margin=dict(l=0, r=0, t=10, b=0),
         showlegend=False,
         xaxis=dict(
+            type='category', # VERWIJDERT ALLE GATEN (Nachten/Weekenden)
+            tickangle=0,
+            nticks=8,
             showgrid=False,
-            rangebreaks=[
-                dict(bounds=["sat", "mon"]), 
-                dict(bounds=[16, 9.5], pattern="hour")
-            ],
             rangeslider_visible=True,
             rangeslider_thickness=0.04
         ),
-        # Volume-as (onzichtbaar geparkeerd)
         yaxis=dict(
             range=[0, hist_df['Volume'].max() * 6], 
             visible=False
         ),
-        # Prijs-as (Gecentreerd op 20% - 80%)
         yaxis2=dict(
             side="right",
             showgrid=True,
-            gridcolor='rgba(255,255,255,0.03)',
+            gridcolor='rgba(255,255,255,0.05)',
             overlaying="y",
-            range=[y_min, y_max], # DEZE RANGE FORCEERT DE ZOOM
+            range=[y_min, y_max], # FORCEERT DE 20/80 ZOOM
             fixedrange=False
         )
     )
