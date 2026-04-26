@@ -110,65 +110,61 @@ elif hist_df is not None:
     hist_df = hist_df.reset_index()
     time_col = hist_df.columns[0]
 
-    # --- Visualisatie: Yahoo Finance Perfected ---
+    # --- Visualisatie: Yahoo Style met Category Scaling ---
     fig = go.Figure()
     
-    # 1. Prijs (Area Chart) - Rechter as
+    # 1. Prijs (Area Chart) - Gekoppeld aan de rechteras (y2)
     fig.add_trace(
         go.Scatter(
-            x=hist_df[time_col], 
+            x=hist_df[time_col].dt.strftime('%d %b %H:%M'), # Gebruik tekstlabels voor category-scaling
             y=hist_df['Close'], 
             name="Prijs",
-            line=dict(color='#00d4ff', width=1.5),
-            fill='tonexty', # Gebruik 'tonexty' of 'tozeroy' voor de vulling
+            line=dict(color='#00d4ff', width=2),
+            fill='tonexty', 
             fillcolor='rgba(0, 212, 255, 0.15)',
             yaxis="y2" 
         )
     )
     
-    # 2. Volume (Bars) - Linker as (onzichtbaar maken)
-    # We gebruiken rood/groen voor volume bars zoals in je voorbeeld
-    vol_colors = []
-    for i in range(len(hist_df)):
-        if i == 0:
-            vol_colors.append('#26a69a') # Groen
-        elif hist_df['Close'].iloc[i] >= hist_df['Close'].iloc[i-1]:
-            vol_colors.append('rgba(38, 166, 154, 0.5)') # Groenachtig
-        else:
-            vol_colors.append('rgba(239, 83, 80, 0.5)') # Roodachtig
+    # 2. Volume (Bars) - Gekoppeld aan de linkeras (y)
+    vol_colors = ['rgba(38, 166, 154, 0.4)' if (i == 0 or hist_df['Close'].iloc[i] >= hist_df['Close'].iloc[i-1]) 
+                  else 'rgba(239, 83, 80, 0.4)' for i in range(len(hist_df))]
     
     fig.add_trace(
         go.Bar(
-            x=hist_df[time_col], 
+            x=hist_df[time_col].dt.strftime('%d %b %H:%M'), 
             y=hist_df['Volume'], 
             marker_color=vol_colors,
-            yaxis="y",
-            opacity=0.8
+            yaxis="y"
         )
     )
     
-    # 3. Layout: De "Magie" zit in de as-instellingen
+    # 3. Dagscheidingen (Verticale lijnen)
+    # We zoeken de indexen waar een nieuwe dag begint voor de verticale lijnen
+    day_starts = hist_df[hist_df[time_col].dt.hour == 9].index
+    for idx in day_starts:
+        fig.add_vline(x=idx, line_width=0.8, line_dash="dot", line_color="rgba(255,255,255,0.2)")
+    
+    # 4. Layout: Focus op Zoom en Schaal
     fig.update_layout(
         template="plotly_dark",
         height=600,
         margin=dict(l=0, r=0, t=30, b=0),
         showlegend=False,
         xaxis=dict(
-            showgrid=True,
-            gridcolor='rgba(255,255,255,0.05)',
-            rangebreaks=[
-                dict(bounds=["sat", "mon"]), 
-                dict(bounds=[16, 9.5], pattern="hour")
-            ],
+            type='category', # DIT SCHAALT DE DAGEN/UREN TEGEN ELKAAR (geen gaten)
+            tickangle=0,
+            nticks=10,
+            showgrid=False,
             rangeslider_visible=True,
             rangeslider_thickness=0.05
         ),
-        # Volume-as: We zetten de range heel hoog zodat de bars onderin 'geplet' worden
+        # Linker-as (Volume): Geparkeerd onderin
         yaxis=dict(
-            range=[0, hist_df['Volume'].max() * 5], 
+            range=[0, hist_df['Volume'].max() * 6], 
             visible=False
         ),
-        # Prijs-as: GEEN fixed range, maar autorange.
+        # Rechter-as (Prijs): Maximaal ingezoomd op waarde
         yaxis2=dict(
             side="right",
             showgrid=True,
@@ -176,14 +172,9 @@ elif hist_df is not None:
             overlaying="y",
             anchor="x",
             fixedrange=False,
-            autorange=True  # DIT zorgt dat de lijn de hele grafiek vult
+            autorange=True # ZOOMT IN OP DE WAARDE
         )
     )
-    
-    # Voeg stippellijnen toe voor de dagscheidingen
-    for timestamp in hist_df[time_col]:
-        if timestamp.hour == 9 and (timestamp.minute == 30 or timestamp.minute == 0):
-            fig.add_vline(x=timestamp, line_width=0.5, line_dash="dot", line_color="rgba(255,255,255,0.3)")
     
     st.plotly_chart(fig, use_container_width=True)
 
