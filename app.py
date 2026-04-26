@@ -121,16 +121,19 @@ with st.sidebar:
     # 2. Gedetailleerde Stats voor de GESELECTEERDE Main Ticker
     if hist_df is not None and not error:
         st.subheader(f"🔍 Details: {sel_ticker}")
-        d_high = hist_df['High'].max()
-        d_low = hist_df['Low'].min()
-        d_close = hist_df['Close'].iloc[-1]
+        
+        # Gebruik .max().item() om er zeker van te zijn dat we een enkel getal krijgen
+        d_high = float(hist_df['High'].max())
+        d_low = float(hist_df['Low'].min())
+        d_close = float(hist_df['Close'].iloc[-1])
         
         col_a, col_b = st.columns(2)
-        col_a.markdown(f"<div class='sidebar-text'>Hoog<br><b style='color:white;'>${float(d_high):.2f}</b></div>", unsafe_allow_html=True)
-        col_b.markdown(f"<div class='sidebar-text'>Laag<br><b style='color:white;'>${float(d_low):.2f}</b></div>", unsafe_allow_html=True)
+        # We halen de float() conversie binnen de f-string weg omdat we het hierboven al doen
+        col_a.markdown(f"<div class='sidebar-text'>Hoog<br><b style='color:white;'>${d_high:.2f}</b></div>", unsafe_allow_html=True)
+        col_b.markdown(f"<div class='sidebar-text'>Laag<br><b style='color:white;'>${d_low:.2f}</b></div>", unsafe_allow_html=True)
         
-        st.markdown(f"<div class='sidebar-metric' style='margin-top:10px;'><small class='sidebar-text'>Huidig</small><br><b style='color:#00d4ff; font-size:1.4rem;'>${float(d_close):.2f}</b></div>", unsafe_allow_html=True)
-
+        st.markdown(f"<div class='sidebar-metric' style='margin-top:10px;'><small class='sidebar-text'>Huidig</small><br><b style='color:#00d4ff; font-size:1.4rem;'>${d_close:.2f}</b></div>", unsafe_allow_html=True)
+    
     st.write("---")
     
     # 3. Controls
