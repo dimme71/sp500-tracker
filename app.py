@@ -183,15 +183,34 @@ elif hist_df is not None:
     )
     
     # Layout aanpassingen
+        # Layout aanpassingen met dynamische schaling
     fig.update_layout(
         template="plotly_dark",
         height=550,
         xaxis_rangeslider_visible=True,
         margin=dict(l=0, r=0, t=30, b=0),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        yaxis=dict(title="Volume", showgrid=False),
-        yaxis2=dict(title="Prijs ($)", side="right", showgrid=True, gridcolor="#2d3748")
+        
+        # Volume as (Y1) - meestal laten we deze op 0 beginnen
+        yaxis=dict(
+            title="Volume", 
+            showgrid=False,
+            fixedrange=False
+        ),
+        
+        # Prijs as (Y2) - DEZE PASST ZICH NU AAN BIJ ZOOMEN
+        yaxis2=dict(
+            title="Prijs ($)", 
+            side="right", 
+            showgrid=True, 
+            gridcolor="#2d3748",
+            fixedrange=False,  # Zorgt dat je handmatig kunt schalen als nodig
+            autorange=True,    # Automatische schaling op basis van data
+        )
     )
+    
+    # Extra toevoeging voor soepele zoom-ervaring
+    fig.update_xaxes(rangeslider_thickness=0.1)
     
     st.plotly_chart(fig, use_container_width=True)
     
